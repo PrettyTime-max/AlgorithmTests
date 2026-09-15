@@ -1,9 +1,4 @@
-﻿using Laba_1;
-using LiveChartsCore;
-using LiveChartsCore.Defaults;
-using LiveChartsCore.SkiaSharpView;
-using LiveChartsCore.SkiaSharpView.WPF;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -12,73 +7,58 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using LiveChartsCore;
+using LiveChartsCore.Defaults;
+using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.WPF;
 
 namespace AlgorithmBenchmark
 {
     public partial class MainWindow : Window
     {
-        private TextBox _txtStartN;
-        private TextBox _txtEndN;
-        private TextBox _txtStep;
-        private Button _btnStart;
-        private ProgressBar _progressBar;
-
-        private ComboBox _cbAlgorithms; // Поле для выпадающего списка
+        /// <summary>
+        /// Элементы интерфейса (UI)
+        /// </summary>        
+        private TextBox _txtStartN;     // Окно ввода начала отсчета
+        private TextBox _txtEndN;       // Окно ввода конца отсчетаего
+        private TextBox _txtStep;       // Шаг
+        private Button _btnStart;       // Окно старта
+        private ProgressBar _progressBar;// Линия загрузки, чтобы пользователь не подумал, что про него забыли
 
         private CartesianChart _chart;
-        private readonly ObservableCollection<ObservablePoint> _chartValues = new();
+        private readonly ObservableCollection<ObservablePoint> _chartValues = new(); // коллекция точек графика
 
         public MainWindow()
         {
-            Title = "Анализ времени выполнения алгоритма";
-            Width = 900;
-            Height = 600;
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            
+            Width = 900;    // Ширина окна приложения
+            Height = 600;   // Высота окна приложения
+            WindowStartupLocation = WindowStartupLocation.CenterScreen; // Позиция окна при открытии приложения
 
             Content = BuildInterface();
         }
 
         private UIElement BuildInterface()
         {
-            Grid mainGrid = new Grid { Margin = new Thickness(15) };
-
+            // Создаем сетку (грубо говоря окно, в котором будут располагаться наши объекты)
+            Grid mainGrid = new Grid { Margin = new Thickness(15) }; // ширина рамок 15 (отстцп от рамок окна)
+            
+            // Создаем строчки для кнопок, линии загрузки и графика
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
+            // Рамка для первой строки
             GroupBox groupBox = new GroupBox
             {
                 Header = " Параметры измерения ",
-                Margin = new Thickness(0, 0, 0, 10),
-                Padding = new Thickness(10)
+                Margin = new Thickness(0, 0, 0, 10), // Внешний отступ от краев нашей строки (первой ячейки в сетке)
+                Padding = new Thickness(10)         // Внутренний отступ
             };
 
-            StackPanel controlsPanel = new StackPanel { Orientation = Orientation.Horizontal };
-
-            // Создаем выпадающий список алгоритмов
-            _cbAlgorithms = new ComboBox
-            {
-                Width = 200,
-                Height = 30,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 15, 0)
-            };
-
-            // Заполняем список названиями алгоритмов
-            _cbAlgorithms.Items.Add("1. Постоянная функция");
-            _cbAlgorithms.Items.Add("2. Сумма элементов");
-            _cbAlgorithms.Items.Add("3. Произведение элементов");
-            _cbAlgorithms.Items.Add("4. Прямое (наивное вычисление)");
-            _cbAlgorithms.Items.Add("5. Полином по схеме Горнера");
-            _cbAlgorithms.Items.Add("6. (Bubble sort) Алгоритм сортировки пузырьком");
-            _cbAlgorithms.Items.Add("7. (Quick sort) Алгоритм быстрой сортировки");
-            _cbAlgorithms.Items.Add("8. (Timsort) Гибридный алгоритм сортировки элементов");
-
-            // Выбираем первый элемент по умолчанию
-            _cbAlgorithms.SelectedIndex = 0;
-
-            controlsPanel.Children.Add(_cbAlgorithms);
-
+            StackPanel controlsPanel = new StackPanel { Orientation = Orientation.Horizontal }; // Подготовка к расположению объектов
+            
+            // сами объекты
             _txtStartN = AddInputField("Старт (N):", "0", controlsPanel);
             _txtEndN = AddInputField("Конец (N):", "1000", controlsPanel);
             _txtStep = AddInputField("Шаг (Step):", "1", controlsPanel);
@@ -143,6 +123,17 @@ namespace AlgorithmBenchmark
             return input;
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static long CalculateSum(ReadOnlySpan<int> array)
+        {
+            long sum = 0;
+            for (int i = 0; i < array.Length; i++)
+            {
+                sum += array[i];
+            }
+            return sum;
+        }
+
         private async void BtnStart_Click(object sender, RoutedEventArgs e)
         {
             if (!int.TryParse(_txtStartN.Text, out int startN) ||
@@ -159,70 +150,55 @@ namespace AlgorithmBenchmark
 
             _chartValues.Clear();
 
-            int selectedAlgorithm = _cbAlgorithms.SelectedIndex; // Выбранный алгоритм пользователем
-
             await Task.Run(() =>
             {
-                // Создаем исходные данные типа double (согласно классу Algorithms)
+                
                 int[] maxData = new int[endN];
                 Random rng = new Random();
                 for (int i = 0; i < endN; i++)
                 {
-                    maxData[i] = rng.Next(0,100);
+                    maxData[i] = rng.Next(1, 100);
                 }
 
                 Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
-                // Прогрев JIT-компилятора для выбранного алгоритма
-                int warmupSize = Math.Min(1000, endN);
-
-                // Готовим срезы двух типов заранее
-                int[] warmupInt = maxData.AsSpan(0, warmupSize).ToArray();
-                double[] warmupDouble = warmupInt.Select(x => (double)x).ToArray();
-
+                
                 for (int i = 0; i < 50; i++)
                 {
-                    ExecuteAlgorithm(selectedAlgorithm, warmupInt, warmupDouble, warmupSize);
+                    CalculateSum(maxData.AsSpan(0, Math.Min(1000, endN)));
                 }
 
                 List<ObservablePoint> results = new List<ObservablePoint>((endN - startN) / step + 1);
 
+
+                
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
 
                 for (int n = startN; n <= endN; n += step)
                 {
-                    const int runs = 5;
-                    long totalTicks = 0;
+                    
+                    ReadOnlySpan<int> slice = maxData.AsSpan(0, n);
+
+                    long minTicks = long.MaxValue;
+                    const int runs = 3; 
 
                     for (int r = 0; r < runs; r++)
                     {
-                        //Готовка целочисленного среза
-                        int[] currentIntData = new int[n];
-                        Array.Copy(maxData, currentIntData, n);
-
-                        // Готовка вещественного среза
-                        double[] currentDoubleData = new double[n];
-                        for (int i = 0; i < n; i++)
-                        {
-                            currentDoubleData[i] = currentIntData[i];
-                        }
-
-                        // замер времени
                         long startTicks = Stopwatch.GetTimestamp();
-
-                        ExecuteAlgorithm(selectedAlgorithm, currentIntData, currentDoubleData, n);
-
+                        CalculateSum(slice);
                         long endTicks = Stopwatch.GetTimestamp();
 
-                        totalTicks += (endTicks - startTicks);
+                        long elapsedTicks = endTicks - startTicks;
+                        if (elapsedTicks < minTicks)
+                        {
+                            minTicks = elapsedTicks;
+                        }
                     }
 
-                    double avgTicks = (double)totalTicks / runs;
-                    double avgMs = (avgTicks * 1000.0) / Stopwatch.Frequency;
-
-                    _chartValues.Add(new ObservablePoint(n, avgMs));
+                    double elapsedMs = (double)minTicks * 1000.0 / Stopwatch.Frequency;
+                    results.Add(new ObservablePoint(n, elapsedMs));
                 }
 
                 Thread.CurrentThread.Priority = ThreadPriority.Normal;
@@ -238,38 +214,6 @@ namespace AlgorithmBenchmark
 
             _progressBar.Visibility = Visibility.Collapsed;
             _btnStart.IsEnabled = true;
-        }
-
-        // Вспомогательный метод с конструкцией switch для вызова метода из Algorithms
-        private void ExecuteAlgorithm(int algorithmIndex, int[] intData, double[] doubleData, int n)
-        {
-            switch (algorithmIndex)
-            {
-                case 0:
-                    Algorithms.Constant(intData);
-                    break;
-                case 1:
-                    Algorithms.Sum(intData);
-                    break;
-                case 2:
-                    Algorithms.Product(intData);
-                    break;
-                case 3:
-                    Algorithms.PolyNaive(doubleData, 1.5);
-                    break;
-                case 4:
-                    Algorithms.PolyHorner(doubleData, 1.5);
-                    break;
-                case 5:
-                    Algorithms.BubbleSort(doubleData);
-                    break;
-                case 6:
-                    Algorithms.QuickSort(doubleData);
-                    break;
-                case 7:
-                    //  Algorithms.FindPivot();
-                    break;
-            }
         }
     }
 }
