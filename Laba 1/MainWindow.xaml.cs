@@ -58,6 +58,11 @@ namespace Laba_1
         private StackPanel _legendPanel3D;
         private TextBlock _txtMinZ;
         private TextBlock _txtMaxZ;
+        private Button _btn3DLayer = null!;
+        private double[,]? _lastZDataExp;
+        private double[,]? _lastZDataTheo;
+        private List<int>? _last3DNValues;
+        private int _current3DMode = 0; // 0: Экспериментальный, 1: Теоретический, 2: Совмещенный (Срез)
 
         // DB & Cache UI Elements
         private DataGrid _dbDataGrid = null!;
@@ -343,6 +348,31 @@ namespace Laba_1
             };
             container3D.Children.Add(_canvas3D);
 
+            // Панель переключения 3D слоев (Экспериментальный / Теоретический / Совмещенный срез)
+            StackPanel layerPanel3D = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(15)
+            };
+
+            _btn3DLayer = new Button
+            {
+                Content = "📊 Слой: Экспериментальный",
+                Height = 34,
+                Padding = new Thickness(14, 0, 14, 0),
+                FontWeight = FontWeights.Bold,
+                FontSize = 13,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3B82F6")),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            _btn3DLayer.Click += Btn3DLayer_Click;
+            layerPanel3D.Children.Add(_btn3DLayer);
+            container3D.Children.Add(layerPanel3D);
+
             _legendPanel3D = new StackPanel
             {
                 Orientation = Orientation.Vertical,
@@ -612,7 +642,40 @@ namespace Laba_1
                     container3D.Visibility = is3D ? Visibility.Visible : Visibility.Collapsed;
                 }
 
-                if (!is3D)
+                if (is3D)
+                {
+                    var distinctN = records.Select(r => r.N).Distinct().OrderBy(n => n).ToList();
+                    int count = distinctN.Count;
+                    if (count > 0)
+                    {
+                        double[,] zData = new double[count, count];
+                        var sortedRecords = records.OrderBy(r => r.N).ToList();
+                        if (sortedRecords.Count >= count * count)
+                        {
+                            for (int i = 0; i < count; i++)
+                            {
+                                for (int j = 0; j < count; j++)
+                                {
+                                    int idx = i * count + j;
+                                    zData[i, j] = sortedRecords[idx].ExecutionTimeMs;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var avgList = sortedRecords.GroupBy(r => r.N).Select(g => g.Average(x => x.ExecutionTimeMs)).ToList();
+                            for (int i = 0; i < count; i++)
+                                for (int j = 0; j < count; j++)
+                                    zData[i, j] = (i < avgList.Count) ? avgList[i] : 0;
+                        }
+
+                        _lastZDataExp = zData;
+                        _last3DNValues = distinctN;
+                        _lastZDataTheo = CalculateTheoretical3DData(count, _last3DNValues, _lastZDataExp);
+                        Redraw3DSurface();
+                    }
+                }
+                else
                 {
                     var aggregatedPoints = records
                         .GroupBy(r => r.N)
@@ -882,8 +945,12 @@ namespace Laba_1
 
             if (token.IsCancellationRequested) return null;
 
-            DrawMatrix3DSurface(zData, count, startN, step);
-            return newDbResults;
+            _lastZDataExp = zData;
+            _last3DNValues = Enumerable.Range(0, count).Select(i => startN + i * step).ToList();
+            _lastZDataTheo = CalculateTheoretical3DData(count, _last3DNValues, _lastZDataExp);
+
+            Redraw3DSurface();
+            return dbResults;
         }
 
         private async Task<List<BenchmarkResult>> RunArray2DBenchmarkAsync(int algorithmIndex, int startN, int endN, int step, bool bypassCache, CancellationToken token)
@@ -1098,61 +1165,146 @@ namespace Laba_1
                     oldParent2.Children.Remove(_chkTheoretical);
                 }
 
-                StackPanel innerPanel = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal
-                };
-                innerPanel.Children.Add(_chkPractical);
-                innerPanel.Children.Add(_chkTheoretical);
 
-                Border layersPanel = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
-                    Padding = new Thickness(8),
-                    CornerRadius = new CornerRadius(3),
-                    Child = innerPanel
-                };
+        private void Btn3DLayer_Click(object sender, RoutedEventArgs e)
+        {
+            _current3DMode = (_current3DMode + 1) % 3;
+            Update3DLayerButtonState();
+            Redraw3DSurface();
+        }
 
-                Canvas.SetLeft(layersPanel, 10);
-                Canvas.SetTop(layersPanel, 10);
-                _canvas3D.Children.Add(layersPanel);
+        private void Update3DLayerButtonState()
+        {
+            if (_btn3DLayer == null) return;
+            switch (_current3DMode)
+            {
+                case 0:
+                    _btn3DLayer.Content = "📊 Слой: Экспериментальный";
+                    _btn3DLayer.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3B82F6"));
+                    break;
+                case 1:
+                    _btn3DLayer.Content = "📐 Слой: Теоретический";
+                    _btn3DLayer.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8B5CF6"));
+                    break;
+                case 2:
+                    _btn3DLayer.Content = "⚡ Совмещенный режим (Срез)";
+                    _btn3DLayer.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EC4899"));
+                    break;
+            }
+        }
+
+        private double[,] CalculateTheoretical3DData(int count, List<int> nValues, double[,] zExpData)
+        {
+            double[,] zTheo = new double[count, count];
+            double maxExpZ = 0;
+            double maxTheoSteps = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                double rowsA = nValues[i];
+                for (int j = 0; j < count; j++)
+                {
+                    double colsA = nValues[j];
+                    double steps = rowsA * colsA * rowsA; // O(M * N * K) для умножения матриц A(MxK) * B(KxN)
+                    if (steps > maxTheoSteps) maxTheoSteps = steps;
+                    if (zExpData[i, j] > maxExpZ) maxExpZ = zExpData[i, j];
+                }
             }
 
-            double minZ = double.MaxValue;
-            double maxZ = double.MinValue;
+            if (maxTheoSteps <= 0) maxTheoSteps = 1;
+            double scaleFactor = maxExpZ / maxTheoSteps;
+
+            for (int i = 0; i < count; i++)
+            {
+                double rowsA = nValues[i];
+                for (int j = 0; j < count; j++)
+                {
+                    double colsA = nValues[j];
+                    double steps = rowsA * colsA * rowsA;
+                    zTheo[i, j] = steps * scaleFactor;
+                }
+            }
+
+            return zTheo;
+        }
+
+        private void Redraw3DSurface()
+        {
+            _canvas3D.Children.Clear();
+            if (_lastZDataExp == null || _last3DNValues == null || _last3DNValues.Count == 0)
+            {
+                _legendPanel3D.Visibility = Visibility.Hidden;
+                return;
+            }
+
+            int count = _last3DNValues.Count;
+            double minZExp = double.MaxValue, maxZExp = double.MinValue;
+            double minZTheo = double.MaxValue, maxZTheo = double.MinValue;
 
             for (int i = 0; i < count; i++)
             {
                 for (int j = 0; j < count; j++)
                 {
-                    if (zData[i, j] < minZ) minZ = zData[i, j];
-                    if (zData[i, j] > maxZ) maxZ = zData[i, j];
+                    if (_lastZDataExp[i, j] < minZExp) minZExp = _lastZDataExp[i, j];
+                    if (_lastZDataExp[i, j] > maxZExp) maxZExp = _lastZDataExp[i, j];
+
+                    if (_lastZDataTheo != null)
+                    {
+                        if (_lastZDataTheo[i, j] < minZTheo) minZTheo = _lastZDataTheo[i, j];
+                        if (_lastZDataTheo[i, j] > maxZTheo) maxZTheo = _lastZDataTheo[i, j];
+                    }
                 }
             }
 
-            if (maxZ == minZ) maxZ = minZ + 1;
+            double globalMinZ = minZExp;
+            double globalMaxZ = maxZExp;
 
-            _txtMinZ.Text = $"{minZ:F2}";
-            _txtMaxZ.Text = $"{maxZ:F2}";
+            if (_lastZDataTheo != null)
+            {
+                globalMinZ = Math.Min(minZExp, minZTheo);
+                globalMaxZ = Math.Max(maxZExp, maxZTheo);
+            }
+
+            if (globalMaxZ == globalMinZ) globalMaxZ = globalMinZ + 1;
+
+            if (_current3DMode == 0)
+            {
+                _txtMinZ.Text = $"{minZExp:F2}";
+                _txtMaxZ.Text = $"{maxZExp:F2}";
+            }
+            else if (_current3DMode == 1)
+            {
+                _txtMinZ.Text = $"{minZTheo:F2}";
+                _txtMaxZ.Text = $"{maxZTheo:F2}";
+            }
+            else
+            {
+                _txtMinZ.Text = $"Эксп: {minZExp:F2} | Теор: {minZTheo:F2}";
+                _txtMaxZ.Text = $"Эксп: {maxZExp:F2} | Теор: {maxZTheo:F2}";
+            }
+
             _legendPanel3D.Visibility = Visibility.Visible;
 
-            DrawAxes(count, startN, step, minZ, maxZ);
+            // Рисуем единые математические оси
+            DrawAxes(count, globalMinZ, globalMaxZ);
 
-            if (_chkPractical?.IsChecked == true)
+            // Отрисовка полигонов от дальних к ближним (Painter's algorithm)
+            for (int i = count - 2; i >= 0; i--)
             {
-                for (int i = count - 2; i >= 0; i--)
+                for (int j = 0; j < count - 1; j++)
                 {
-                    for (int j = 0; j < count - 1; j++)
+                    // 1. Экспериментальный слой (Режим 0 и Режим 2)
+                    if (_current3DMode == 0 || _current3DMode == 2)
                     {
-                        Point p1 = GetIsometricProjection(i, j, zData[i, j], count, minZ, maxZ);
-                        Point p2 = GetIsometricProjection(i + 1, j, zData[i + 1, j], count, minZ, maxZ);
-                        Point p3 = GetIsometricProjection(i + 1, j + 1, zData[i + 1, j + 1], count, minZ, maxZ);
-                        Point p4 = GetIsometricProjection(i, j + 1, zData[i, j + 1], count, minZ, maxZ);
+                        Point p1 = GetIsometricProjection(i, j, _lastZDataExp[i, j], count, globalMinZ, globalMaxZ);
+                        Point p2 = GetIsometricProjection(i + 1, j, _lastZDataExp[i + 1, j], count, globalMinZ, globalMaxZ);
+                        Point p3 = GetIsometricProjection(i + 1, j + 1, _lastZDataExp[i + 1, j + 1], count, globalMinZ, globalMaxZ);
+                        Point p4 = GetIsometricProjection(i, j + 1, _lastZDataExp[i, j + 1], count, globalMinZ, globalMaxZ);
 
-                        double avgZ = (zData[i, j] + zData[i + 1, j] + zData[i + 1, j + 1] + zData[i, j + 1]) / 4.0;
-                        double normalizedZ = (avgZ - minZ) / (maxZ - minZ);
+                        double avgZ = (_lastZDataExp[i, j] + _lastZDataExp[i + 1, j] + _lastZDataExp[i + 1, j + 1] + _lastZDataExp[i, j + 1]) / 4.0;
+                        double normalizedZ = (avgZ - globalMinZ) / (globalMaxZ - globalMinZ);
 
-                        Polygon polygon = new Polygon
+                        Polygon polygonExp = new Polygon
                         {
                             Points = new PointCollection { p1, p2, p3, p4 },
                             Fill = new SolidColorBrush(GetHeatmapColor(normalizedZ)),
@@ -1161,79 +1313,58 @@ namespace Laba_1
                             StrokeLineJoin = PenLineJoin.Round
                         };
 
-                        _canvas3D.Children.Add(polygon);
-                    }
-                }
-            }
-
-            if (_chkTheoretical?.IsChecked == true)
-            {
-                DrawTheoreticalWireframe3D(zData, count, startN, step, minZ, maxZ);
-            }
-        }
-
-        private void DrawTheoreticalWireframe3D(double[,] zData, int count, int startN, int step, double minZ, double maxZ)
-        {
-            int lastIdx = count - 1;
-            int maxRowsA = startN + lastIdx * step;
-            int maxColsA = startN + lastIdx * step;
-            int maxColsB = maxRowsA;
-            long maxOps = (long)maxRowsA * maxColsA * maxColsB;
-
-            double maxPracticalZ = zData[lastIdx, lastIdx];
-            double k = maxOps > 0 ? maxPracticalZ / maxOps : 0;
-
-            double[,] zTheory = new double[count, count];
-            for (int i = 0; i < count; i++)
-            {
-                int rowsA = startN + i * step;
-                for (int j = 0; j < count; j++)
-                {
-                    int colsA = startN + j * step;
-                    int colsB = rowsA;
-                    long ops = (long)rowsA * colsA * colsB;
-                    zTheory[i, j] = k * ops;
-                }
-            }
-
-            int gridStep = Math.Max(1, count / 12);
-
-            for (int i = 0; i < count; i += gridStep)
-            {
-                for (int j = 0; j < count; j += gridStep)
-                {
-                    Point current = GetIsometricProjection(i, j, zTheory[i, j], count, minZ, maxZ);
-
-                    int nextJ = j + gridStep;
-                    if (nextJ < count)
-                    {
-                        Point nextX = GetIsometricProjection(i, nextJ, zTheory[i, nextJ], count, minZ, maxZ);
-                        DrawDashedLine(current, nextX);
+                        _canvas3D.Children.Add(polygonExp);
                     }
 
-                    int nextI = i + gridStep;
-                    if (nextI < count)
+                    // 2. Теоретический слой (Режим 1 и Режим 2)
+                    if (_lastZDataTheo != null && (_current3DMode == 1 || _current3DMode == 2))
                     {
-                        Point nextY = GetIsometricProjection(nextI, j, zTheory[nextI, j], count, minZ, maxZ);
-                        DrawDashedLine(current, nextY);
+                        Point p1 = GetIsometricProjection(i, j, _lastZDataTheo[i, j], count, globalMinZ, globalMaxZ);
+                        Point p2 = GetIsometricProjection(i + 1, j, _lastZDataTheo[i + 1, j], count, globalMinZ, globalMaxZ);
+                        Point p3 = GetIsometricProjection(i + 1, j + 1, _lastZDataTheo[i + 1, j + 1], count, globalMinZ, globalMaxZ);
+                        Point p4 = GetIsometricProjection(i, j + 1, _lastZDataTheo[i, j + 1], count, globalMinZ, globalMaxZ);
+
+                        if (_current3DMode == 1)
+                        {
+                            double avgZ = (_lastZDataTheo[i, j] + _lastZDataTheo[i + 1, j] + _lastZDataTheo[i + 1, j + 1] + _lastZDataTheo[i, j + 1]) / 4.0;
+                            double normalizedZ = (avgZ - globalMinZ) / (globalMaxZ - globalMinZ);
+
+                            Polygon polygonTheo = new Polygon
+                            {
+                                Points = new PointCollection { p1, p2, p3, p4 },
+                                Fill = new SolidColorBrush(GetTheoreticalHeatmapColor(normalizedZ)),
+                                Stroke = new SolidColorBrush(Color.FromArgb(120, 139, 92, 246)),
+                                StrokeThickness = 0.6,
+                                StrokeLineJoin = PenLineJoin.Round
+                            };
+                            _canvas3D.Children.Add(polygonTheo);
+                        }
+                        else
+                        {
+                            // Совмещенный "срез" — полупрозрачная фиолетовая каркасная сетка
+                            Polygon polygonCut = new Polygon
+                            {
+                                Points = new PointCollection { p1, p2, p3, p4 },
+                                Fill = new SolidColorBrush(Color.FromArgb(50, 139, 92, 246)),
+                                Stroke = new SolidColorBrush(Color.FromArgb(220, 91, 33, 182)),
+                                StrokeThickness = 1.3,
+                                StrokeDashArray = new DoubleCollection { 3, 2 },
+                                StrokeLineJoin = PenLineJoin.Round
+                            };
+                            _canvas3D.Children.Add(polygonCut);
+                        }
                     }
                 }
             }
         }
 
-        private void DrawDashedLine(Point p1, Point p2)
+        private Color GetTheoreticalHeatmapColor(double value)
         {
-            Line line = new Line
-            {
-                X1 = p1.X,
-                Y1 = p1.Y,
-                X2 = p2.X,
-                Y2 = p2.Y,
-                Stroke = Brushes.Crimson,
-                StrokeThickness = 1.2,
-                StrokeDashArray = new DoubleCollection() { 3, 2 }
-            };
-            _canvas3D.Children.Add(line);
+            value = Math.Max(0, Math.Min(1, value));
+            byte r = (byte)(76 + (6 - 76) * value);
+            byte g = (byte)(29 + (182 - 29) * value);
+            byte b = (byte)(149 + (212 - 149) * value);
+            return Color.FromRgb(r, g, b);
         }
 
         private void DrawAxes(int count, int startN, int step, double minZ, double maxZ)
