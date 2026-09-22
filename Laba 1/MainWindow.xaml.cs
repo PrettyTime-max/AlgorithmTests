@@ -500,10 +500,12 @@ namespace Laba_1
         private async Task<List<BenchmarkResult>> RunArray2DBenchmarkAsync(int algorithmIndex, int startN, int endN, int step, CancellationToken token)
         {
             _chartValues.Clear();
-            _theoreticalValues.Clear(); // Очищаем теоретическую коллекцию перед новым замером
+            _theoreticalValues.Clear();
             string algName = _cbAlgorithms.SelectedItem.ToString();
             List<BenchmarkResult> dbResults = new List<BenchmarkResult>();
             DateTime experimentTimestamp = DateTime.UtcNow;
+
+            bool isStepBased = algorithmIndex >= 12 && algorithmIndex <= 14;
 
             await Task.Run(() =>
             {
@@ -537,17 +539,18 @@ namespace Laba_1
 
                     const int runs = 5;
                     long totalTicks = 0;
+                    long lastSteps = 0;
 
                     for (int r = 0; r < runs; r++)
                     {
                         Array.Copy(maxDataInt, intData, n);
-
                         for (int i = 0; i < n; i++) doubleData[i] = intData[i];
 
                         long startTicks = Stopwatch.GetTimestamp();
                         long steps = ExecuteAlgorithm(algorithmIndex, intData, doubleData, n);
                         long endTicks = Stopwatch.GetTimestamp();
 
+                        lastSteps = steps;
                         long elapsedTicks = endTicks - startTicks;
                         totalTicks += elapsedTicks;
 
@@ -559,22 +562,36 @@ namespace Laba_1
                             N = n,
                             RunNumber = r + 1,
                             ExecutionTimeMs = singleRunMs,
-                            StepCount = steps > 0 ? steps : null,
+                            StepCount = isStepBased ? steps : null,
                             ExperimentDate = experimentTimestamp
                         });
                     }
 
-                    double avgMs = ((double)totalTicks / runs * 1000.0) / Stopwatch.Frequency;
-                    results.Add(new ObservablePoint(n, avgMs));
+                    if (isStepBased)
+                    {
+                        // Для степенных алгоритмов строим Y от шагов
+                        results.Add(new ObservablePoint(n, lastSteps));
+                    }
+                    else
+                    {
+                        // Для остальных — от времени
+                        double avgMs = ((double)totalTicks / runs * 1000.0) / Stopwatch.Frequency;
+                        results.Add(new ObservablePoint(n, avgMs));
+                    }
                 }
 
                 Thread.CurrentThread.Priority = ThreadPriority.Normal;
 
                 Dispatcher.Invoke(() =>
                 {
+                    // Обновляем название оси Y
+                    if (_chart2D.YAxes.FirstOrDefault() is Axis yAxis)
+                    {
+                        yAxis.Name = isStepBased ? "Количество операций (шагов)" : "Время (мс)";
+                    }
+
                     foreach (var pt in results) _chartValues.Add(pt);
 
-                    // Расчет и построение идеальной кривой
                     CalculateTheoreticalCurve(algName, results);
                 });
             }, token);
@@ -658,17 +675,17 @@ namespace Laba_1
                 case 12:
                     Algorithms.ResetSteps();
                     Algorithms.PowIterative(1.0001, n);
-                    return n;
+                    return Algorithms.StepCount;
 
                 case 13:
                     Algorithms.ResetSteps();
                     Algorithms.PowRecursive(1.0001, n);
-                    return n;
+                    return Algorithms.StepCount;
 
                 case 14:
                     Algorithms.ResetSteps();
                     Algorithms.PowBinary(1.0001, n);
-                    return (long)Math.Log2(n);
+                    return Algorithms.StepCount;
 
                 default:
                     return -1;
