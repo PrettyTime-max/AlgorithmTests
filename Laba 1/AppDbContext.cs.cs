@@ -39,7 +39,7 @@ namespace Laba_1
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            // Укажите свои данные для подключения к PostgreSQL
+            // Укажите свои данные для подключения к PostgreSQL (если пароль отсутствует, можно не подключать)
             string connectionString = "Host=localhost;Port=5432;Database=AlgorithmBenchmarksDb;Username=postgres;Password=your_password";
             optionsBuilder.UseNpgsql(connectionString);
         }
