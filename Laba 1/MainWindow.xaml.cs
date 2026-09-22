@@ -679,7 +679,7 @@ namespace Laba_1
 
                 case 13:
                     Algorithms.ResetSteps();
-                    Algorithms.PowRecursive(1.0001, n);
+                    Algorithms.PowRecursiveSafe(1.0001, n);
                     return Algorithms.StepCount;
 
                 case 14:

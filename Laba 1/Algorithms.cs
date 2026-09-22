@@ -208,6 +208,24 @@ namespace Laba_1
             return x * PowRecursive(x, n - 1);
         }
 
+        public static double PowRecursiveSafe(double x, int n)
+        {
+            double result = 0;
+
+            // 64 МБ должно хватить примерно до 800 000
+            int maxStackSize = 64 * 1024 * 1024;
+
+            Thread thread = new Thread(() =>
+            {
+                result = PowRecursive(x, n);
+            }, maxStackSize);
+
+            thread.Start();
+            thread.Join();
+
+            return result;
+        }
+
         // 12 Быстрый (бинарный) — на основе двоичного представления, O(log n)
         public static double PowBinary(double x, int n)
         {
