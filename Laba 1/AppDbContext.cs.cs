@@ -9,8 +9,13 @@ namespace Laba_1
     // Модель сессии замера для отображения в выпадающем списке
     public class ExperimentSession
     {
+        public int Id { get; set; }
+        public string AlgorithmName { get; set; }
+        public int StartN { get; set; }
+        public int EndN { get; set; }
+        public int Step { get; set; }
+        public DateTime CreatedAt { get; set; }
         public DateTime ExperimentDate { get; set; }
-        public string AlgorithmName { get; set; } = string.Empty;
         public int MinN { get; set; }
         public int MaxN { get; set; }
         public int TotalRecords { get; set; }
@@ -21,7 +26,7 @@ namespace Laba_1
         public override string ToString() => DisplayText;
     }
 
-    // Схема таблицы результатов замеров
+    // Схема таблицы результатов замеров (пункт 2 из ТЗ)
     public class BenchmarkResult
     {
         public int Id { get; set; }
@@ -35,13 +40,16 @@ namespace Laba_1
 
     public class AppDbContext : DbContext
     {
-        public DbSet<BenchmarkResult> BenchmarkResults { get; set; }
+        public DbSet<BenchmarkResult> BenchmarkResults { get; set; } = null!;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            // Укажите свои данные для подключения к PostgreSQL (если пароль отсутствует, можно не подключать)
-            string connectionString = "Host=localhost;Port=5432;Database=AlgorithmBenchmarksDb;Username=postgres;Password=your_password";
-            optionsBuilder.UseNpgsql(connectionString);
+            if (!optionsBuilder.IsConfigured)
+            {
+                // Укажите свои данные для подключения к PostgreSQL
+                string connectionString = "Host=localhost;Port=5432;Database=AlgorithmBenchmarksDb;Username=postgres;Password=your_password";
+                optionsBuilder.UseNpgsql(connectionString);
+            }
         }
 
         public static async Task InitDatabaseAsync()
@@ -50,11 +58,31 @@ namespace Laba_1
             await db.Database.EnsureCreatedAsync();
         }
 
-        public static async Task SaveResultsAsync(IEnumerable<BenchmarkResult> results)
+        public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step)
         {
-            using var db = new AppDbContext();
-            await db.BenchmarkResults.AddRangeAsync(results);
-            await db.SaveChangesAsync();
+            var session = new ExperimentSession
+            {
+                AlgorithmName = algorithmName,
+                StartN = startN,
+                EndN = endN,
+                Step = step,
+                CreatedAt = DateTime.Now
+            };
+            if (results == null || results.Count == 0) return;
+            using (var context = new AppDbContext())
+            {
+                await context.BenchmarkResults.AddRangeAsync(results);
+                await context.SaveChangesAsync();
+            }
+        }
+
+        public static async Task ClearAllResultsAsync()
+        {
+            using (var context = new AppDbContext())
+            {
+                context.BenchmarkResults.RemoveRange(context.BenchmarkResults);
+                await context.SaveChangesAsync();
+            }
         }
 
         // 1. Получить список всех сохраненных сессий замеров (для выпадающего списка)
@@ -89,6 +117,42 @@ namespace Laba_1
                 .OrderBy(r => r.N)
                 .ThenBy(r => r.RunNumber)
                 .ToListAsync();
+        }
+
+        // 3. МЕХАНИЗМ КЭШИРОВАНИЯ (пункт 3 из ТЗ):
+        // Проверяет наличие уже рассчитанных результатов для комбинации "Алгоритм + N"
+        public static async Task<List<BenchmarkResult>> GetCachedResultsAsync(string algorithmName, int n)
+        {
+            using var db = new AppDbContext();
+            return await db.BenchmarkResults
+                .Where(r => r.AlgorithmName == algorithmName && r.N == n)
+                .OrderBy(r => r.RunNumber)
+                .ToListAsync();
+        }
+
+        // 4. Получить абсолютно все сохраненные замеры из БД
+        public static async Task<List<BenchmarkResult>> GetAllResultsAsync()
+        {
+            using var db = new AppDbContext();
+            return await db.BenchmarkResults
+                .OrderByDescending(r => r.Id)
+                .ToListAsync();
+        }
+
+        // 5. Очистить все замеры в БД
+        public static async Task ClearDatabaseAsync()
+        {
+            using var db = new AppDbContext();
+            db.BenchmarkResults.RemoveRange(db.BenchmarkResults);
+            await db.SaveChangesAsync();
+        }
+
+        // 6. Очистка кэша/памяти приложения
+        public static void ForceClearMemoryCache()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
     }
 }
