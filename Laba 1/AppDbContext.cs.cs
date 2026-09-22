@@ -1,6 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -42,13 +43,13 @@ namespace Laba_1
     {
         public DbSet<BenchmarkResult> BenchmarkResults { get; set; } = null!;
 
+        public static string DbFilePath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "benchmarks_history.db");
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             if (!optionsBuilder.IsConfigured)
             {
-                // Укажите свои данные для подключения к PostgreSQL
-                string connectionString = "Host=localhost;Port=5432;Database=AlgorithmBenchmarksDb;Username=postgres;Password=your_password";
-                optionsBuilder.UseNpgsql(connectionString);
+                optionsBuilder.UseSqlite($"Data Source={DbFilePath}");
             }
         }
 
@@ -139,7 +140,16 @@ namespace Laba_1
                 .ToListAsync();
         }
 
-        // 5. Очистить все замеры в БД
+        // 3. Получить все сохраненные замеры из БД
+        public static async Task<List<BenchmarkResult>> GetAllResultsAsync()
+        {
+            using var db = new AppDbContext();
+            return await db.BenchmarkResults
+                .OrderByDescending(r => r.Id)
+                .ToListAsync();
+        }
+
+        // 4. Очистить все замеры в БД
         public static async Task ClearDatabaseAsync()
         {
             using var db = new AppDbContext();
@@ -147,7 +157,21 @@ namespace Laba_1
             await db.SaveChangesAsync();
         }
 
-        // 6. Очистка кэша/памяти приложения
+        // 5. Размер файла БД
+        public static long GetDatabaseFileSizeBytes()
+        {
+            try
+            {
+                if (File.Exists(DbFilePath))
+                {
+                    return new FileInfo(DbFilePath).Length;
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        // 6. Очистка кэша оперативной памяти
         public static void ForceClearMemoryCache()
         {
             GC.Collect();
