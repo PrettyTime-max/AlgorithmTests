@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 
 namespace Laba_1
 {
@@ -10,7 +11,7 @@ namespace Laba_1
     public class ExperimentSession
     {
         public int Id { get; set; }
-        public string AlgorithmName { get; set; }
+        public string AlgorithmName { get; set; } = string.Empty;
         public int StartN { get; set; }
         public int EndN { get; set; }
         public int Step { get; set; }
@@ -26,28 +27,28 @@ namespace Laba_1
         public override string ToString() => DisplayText;
     }
 
-    // Схема таблицы результатов замеров (пункт 2 из ТЗ)
     public class BenchmarkResult
     {
         public int Id { get; set; }
         public string AlgorithmName { get; set; } = string.Empty; // Название алгоритма
-        public int N { get; set; }                               // Размер входных данных (N)
-        public int RunNumber { get; set; }                       // Номер запуска (1..5)
+        public int N { get; set; }                               // Размер входных данных 
+        public int RunNumber { get; set; }                       // Номер запуска 
         public double ExecutionTimeMs { get; set; }              // Затраченное время (мс)
-        public long? StepCount { get; set; }                    // Количество шагов
+        public long? StepCount { get; set; }                    // Количество шагов (зависит от алгоритма)
         public DateTime ExperimentDate { get; set; } = DateTime.UtcNow; // Дата эксперимента
     }
 
     public class AppDbContext : DbContext
     {
+        public DbSet<ExperimentSession> ExperimentSessions { get; set; } = null!;
         public DbSet<BenchmarkResult> BenchmarkResults { get; set; } = null!;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             if (!optionsBuilder.IsConfigured)
             {
-                // Укажите свои данные для подключения к PostgreSQL
-                string connectionString = "Host=localhost;Port=5432;Database=AlgorithmBenchmarksDb;Username=postgres;Password=your_password";
+                // Указать свои данные для подключения к PostgreSQL (БД)
+                string connectionString = "Host=localhost;Port=5432;Database=BenchmarkDb;Username=postgres;Password=your_password";
                 optionsBuilder.UseNpgsql(connectionString);
             }
         }
@@ -58,57 +59,73 @@ namespace Laba_1
             await db.Database.EnsureCreatedAsync();
         }
 
+        // Поиск ранее проведенной сессии по входным параметрам
+        public static async Task<ExperimentSession?> FindExistingSessionAsync(string algorithmName, int startN, int endN, int step)
+        {
+            using var db = new AppDbContext();
+            return await db.ExperimentSessions
+                .Where(s => s.AlgorithmName == algorithmName
+                         && s.StartN == startN
+                         && s.EndN == endN
+                         && s.Step == step)
+                .OrderByDescending(s => s.ExperimentDate)
+                .FirstOrDefaultAsync();
+        }
+
         public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step)
         {
-            var session = new ExperimentSession
-            {
-                AlgorithmName = algorithmName,
-                StartN = startN,
-                EndN = endN,
-                Step = step,
-                CreatedAt = DateTime.Now
-            };
             if (results == null || results.Count == 0) return;
+
             using (var context = new AppDbContext())
             {
-                await context.BenchmarkResults.AddRangeAsync(results);
-                await context.SaveChangesAsync();
+                var now = DateTime.UtcNow;
+
+                // Проставляем единую дату эксперимента для всех результатов замеров
+                foreach (var res in results)
+                {
+                    res.ExperimentDate = now;
+                }
+
+                // Создаем объект сессии с параметрами диапазона
+                var session = new ExperimentSession
+                {
+                    AlgorithmName = algorithmName,
+                    StartN = startN,
+                    EndN = endN,
+                    Step = step,
+                    MinN = startN,
+                    MaxN = endN,
+                    CreatedAt = now,
+                    ExperimentDate = now,
+                    TotalRecords = results.Count
+                };
+
+                try
+                {
+                    context.ExperimentSessions.Add(session);
+                    await context.SaveChangesAsync();
+
+                    await context.BenchmarkResults.AddRangeAsync(results);
+                    await context.SaveChangesAsync();
+                }
+                catch (DbUpdateException ex)
+                {
+                    string innerMsg = ex.InnerException?.Message ?? ex.Message;
+                    MessageBox.Show($"Ошибка БД: {innerMsg}");
+                    throw;
+                }
             }
         }
 
-        public static async Task ClearAllResultsAsync()
-        {
-            using (var context = new AppDbContext())
-            {
-                context.BenchmarkResults.RemoveRange(context.BenchmarkResults);
-                await context.SaveChangesAsync();
-            }
-        }
-
-        // 1. Получить список всех сохраненных сессий замеров (для выпадающего списка)
         public static async Task<List<ExperimentSession>> GetExperimentSessionsAsync()
         {
             using var db = new AppDbContext();
-
-            var rawData = await db.BenchmarkResults
-                .Select(r => new { r.ExperimentDate, r.AlgorithmName, r.N })
-                .ToListAsync();
-
-            return rawData
-                .GroupBy(r => new { r.ExperimentDate, r.AlgorithmName })
-                .Select(g => new ExperimentSession
-                {
-                    ExperimentDate = g.Key.ExperimentDate,
-                    AlgorithmName = g.Key.AlgorithmName,
-                    MinN = g.Min(x => x.N),
-                    MaxN = g.Max(x => x.N),
-                    TotalRecords = g.Count()
-                })
+            return await db.ExperimentSessions
                 .OrderByDescending(s => s.ExperimentDate)
-                .ToList();
+                .ToListAsync();
         }
 
-        // 2. Получить замеры для конкретной выбранной сессии
+        // Получить замеры для конкретной выбранной сессии
         public static async Task<List<BenchmarkResult>> GetResultsForSessionAsync(DateTime date, string algorithmName)
         {
             using var db = new AppDbContext();
@@ -119,8 +136,7 @@ namespace Laba_1
                 .ToListAsync();
         }
 
-        // 3. МЕХАНИЗМ КЭШИРОВАНИЯ (пункт 3 из ТЗ):
-        // Проверяет наличие уже рассчитанных результатов для комбинации "Алгоритм + N"
+        // Кэширование
         public static async Task<List<BenchmarkResult>> GetCachedResultsAsync(string algorithmName, int n)
         {
             using var db = new AppDbContext();
@@ -130,7 +146,7 @@ namespace Laba_1
                 .ToListAsync();
         }
 
-        // 4. Получить абсолютно все сохраненные замеры из БД
+        // Получить абсолютно все сохраненные замеры из БД
         public static async Task<List<BenchmarkResult>> GetAllResultsAsync()
         {
             using var db = new AppDbContext();
@@ -139,20 +155,13 @@ namespace Laba_1
                 .ToListAsync();
         }
 
-        // 5. Очистить все замеры в БД
-        public static async Task ClearDatabaseAsync()
+        // Очистить все таблицы
+        public static async Task ClearAllResultsAsync()
         {
             using var db = new AppDbContext();
             db.BenchmarkResults.RemoveRange(db.BenchmarkResults);
+            db.ExperimentSessions.RemoveRange(db.ExperimentSessions);
             await db.SaveChangesAsync();
-        }
-
-        // 6. Очистка кэша/памяти приложения
-        public static void ForceClearMemoryCache()
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
         }
     }
 }

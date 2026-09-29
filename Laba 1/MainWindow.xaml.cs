@@ -61,6 +61,8 @@ namespace Laba_1
             InitializeComponent();
             InitLayerControls();
 
+            _ = AppDbContext.InitDatabaseAsync();
+
             Title = "Анализ сложности алгоритмов (с БД PostgreSQL)";
             Width = 1350;
             Height = 750;
@@ -103,6 +105,7 @@ namespace Laba_1
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            await AppDbContext.InitDatabaseAsync();
             try
             {
                 await AppDbContext.InitDatabaseAsync();
@@ -115,9 +118,8 @@ namespace Laba_1
             }
         }
 
-        /// <summary>
-        /// Считывает историю замеров из БД и обновляет выпадающий список _cbHistory
-        /// </summary>
+        // Считывает историю замеров из БД и обновляет выпадающий список _cbHistory
+
         public async Task LoadHistoryAsync()
         {
             try
