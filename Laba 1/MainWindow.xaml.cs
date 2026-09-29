@@ -401,57 +401,79 @@ namespace Laba_1
                 _chartValues.Clear();
                 _theoreticalValues.Clear();
 
-                // Переключение отображения (2D/3D)
+                // 1. Определение типа графика
                 bool is3D = selectedSession.AlgorithmName.Contains("3D") || selectedSession.AlgorithmName.Contains("матриц");
+
+                // 2. Находим TabControl и принудительно переключаем на вкладку с графиками (индекс 0)
+                if (Content is Grid mainGrid)
+                {
+                    var tabControl = mainGrid.Children.OfType<TabControl>().FirstOrDefault();
+                    if (tabControl != null)
+                    {
+                        tabControl.SelectedIndex = 0; // Вкладка "График"
+                    }
+                }
+
+                // 3. Устанавливаем видимость контейнеров 2D и 3D
                 _chart2D.Visibility = is3D ? Visibility.Collapsed : Visibility.Visible;
                 if (_canvas3D.Parent is Grid container3D)
                 {
                     container3D.Visibility = is3D ? Visibility.Visible : Visibility.Collapsed;
                 }
 
-                if (!is3D)
+                // 4. Задерживаем наполнение данных до момента, когда WPF обновит Layout (разметку)
+                await Dispatcher.InvokeAsync(() =>
                 {
-                    var aggregatedPoints = records
-                        .GroupBy(r => r.N)
-                        .OrderBy(g => g.Key)
-                        .Select(g => new ObservablePoint(g.Key, g.Average(r => r.ExecutionTimeMs)))
-                        .ToList();
-
-                    foreach (var pt in aggregatedPoints)
+                    if (!is3D)
                     {
-                        _chartValues.Add(pt);
-                    }
+                        var aggregatedPoints = records
+                            .GroupBy(r => r.N)
+                            .OrderBy(g => g.Key)
+                            .Select(g => new ObservablePoint(g.Key, g.Average(r => r.ExecutionTimeMs)))
+                            .ToList();
 
-                    CalculateTheoreticalCurve(selectedSession.AlgorithmName, aggregatedPoints);
-                }
-                else
-                {
-                    var distinctN = records.Select(r => r.N).Distinct().OrderBy(n => n).ToList();
-                    int count = distinctN.Count;
-
-                    if (count > 0)
-                    {
-                        int startN = distinctN.First();
-                        int step = count > 1 ? distinctN[1] - distinctN[0] : 1;
-
-                        double[,] zData = new double[count, count];
-                        var recordsDict = records.ToDictionary(r => r.N, r => r.ExecutionTimeMs);
-
-                        for (int i = 0; i < count; i++)
+                        foreach (var pt in aggregatedPoints)
                         {
-                            for (int j = 0; j < count; j++)
-                            {
-                                int currentN = startN + i * step;
-                                if (recordsDict.TryGetValue(currentN, out double val))
-                                {
-                                    zData[i, j] = val;
-                                }
-                            }
+                            _chartValues.Add(pt);
                         }
 
-                        DrawMatrix3DSurface(zData, count, startN, step);
+                        CalculateTheoreticalCurve(selectedSession.AlgorithmName, aggregatedPoints);
                     }
-                }
+                    else
+                    {
+                        var distinctN = records.Select(r => r.N).Distinct().OrderBy(n => n).ToList();
+                        int count = distinctN.Count;
+
+                        if (count > 0)
+                        {
+                            int startN = distinctN.First();
+                            int step = count > 1 ? distinctN[1] - distinctN[0] : 1;
+
+                            double[,] zData = new double[count, count];
+
+                            // Группируем результаты по N (строки i)
+                            var groupedByN = records
+                                .GroupBy(r => r.N)
+                                .ToDictionary(g => g.Key, g => g.ToList());
+
+                            for (int i = 0; i < count; i++)
+                            {
+                                int currentN = startN + i * step;
+
+                                if (groupedByN.TryGetValue(currentN, out var rowList))
+                                {
+                                    // Записи одной строки i упорядочиваем по порядку следования j
+                                    for (int j = 0; j < count && j < rowList.Count; j++)
+                                    {
+                                        zData[i, j] = rowList[j].ExecutionTimeMs;
+                                    }
+                                }
+                            }
+
+                            DrawMatrix3DSurface(zData, count, startN, step);
+                        }
+                    }
+                }, System.Windows.Threading.DispatcherPriority.Render);
 
                 MessageBox.Show($"График и таблица успешно восстановлены из БД!\nФункция: {selectedSession.AlgorithmName}\nЗаписей: {records.Count}",
                                 "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
