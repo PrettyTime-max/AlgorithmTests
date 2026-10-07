@@ -189,8 +189,9 @@ namespace Laba_1
             _cbAlgorithms.Items.Add("14. Рекурсивный алгоритм");
             _cbAlgorithms.Items.Add("15. Быстрый (бинарный) алгоритм возведения в степень");
 
-            _cbAlgorithms.SelectedIndex = 0;
+            // Подписываемся на событие до установки индекса
             _cbAlgorithms.SelectionChanged += CbAlgorithms_SelectionChanged;
+            _cbAlgorithms.SelectedIndex = 0; // Теперь при старте приложения поля разблокируются корректно
 
             controlsPanel.Children.Add(_cbAlgorithms);
 
@@ -498,12 +499,37 @@ namespace Laba_1
 
         private void CbAlgorithms_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            bool isMatrix3D = IsMatrixAlgorithm(_cbAlgorithms.SelectedIndex);
+            // Защита от NullReferenceException во время инициализации UI
+            if (_cbAlgorithms == null || _chart2D == null || _txtStartN == null || _txtStep == null)
+                return;
 
+            int index = _cbAlgorithms.SelectedIndex;
+            if (index < 0) return;
+
+            bool isMatrix3D = IsMatrixAlgorithm(index);
+
+            // Управление отображением 2D / 3D графиков
             _chart2D.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
-            if (_canvas3D.Parent is Grid container3D)
+            if (_canvas3D?.Parent is Grid container3D)
             {
                 container3D.Visibility = isMatrix3D ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            // Алгоритмы степеней (индексы 12, 13, 14 в ComboBox)
+            bool isPowerAlgorithm = index >= 12 && index <= 14;
+
+            if (isPowerAlgorithm)
+            {
+                _txtStartN.IsEnabled = false;
+                _txtStartN.Text = "1";
+
+                _txtStep.IsEnabled = false;
+                _txtStep.Text = "1";
+            }
+            else
+            {
+                _txtStartN.IsEnabled = true;
+                _txtStep.IsEnabled = true;
             }
         }
 
