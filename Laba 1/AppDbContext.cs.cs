@@ -72,7 +72,7 @@ namespace Laba_1
                 .FirstOrDefaultAsync();
         }
 
-        public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step)
+        public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step) // создает новую запись в бд
         {
             if (results == null || results.Count == 0) return;
 
@@ -117,7 +117,8 @@ namespace Laba_1
             }
         }
 
-        public static async Task<List<ExperimentSession>> GetExperimentSessionsAsync()
+        // Возвращает список всех проведенных сессий, отсортированный от новых к старым
+        public static async Task<List<ExperimentSession>> GetExperimentSessionsAsync() 
         {
             using var db = new AppDbContext();
             return await db.ExperimentSessions
@@ -126,7 +127,7 @@ namespace Laba_1
         }
 
         // Получить замеры для конкретной выбранной сессии
-        public static async Task<List<BenchmarkResult>> GetResultsForSessionAsync(DateTime date, string algorithmName)
+        public static async Task<List<BenchmarkResult>> GetResultsForSessionAsync(DateTime date, string algorithmName) 
         {
             using var db = new AppDbContext();
             return await db.BenchmarkResults
@@ -137,7 +138,7 @@ namespace Laba_1
         }
 
         // Кэширование
-        public static async Task<List<BenchmarkResult>> GetCachedResultsAsync(string algorithmName, int n)
+        public static async Task<List<BenchmarkResult>> GetCachedResultsAsync(string algorithmName, int n) // Возвращает готовые замеры для алгоритма
         {
             using var db = new AppDbContext();
             return await db.BenchmarkResults

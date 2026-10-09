@@ -27,11 +27,6 @@ namespace Laba_1
         private Button _btnStart;
         private Button _btnStop;
 
-        private double[,] _lastZData;
-        private int _lastCount;
-        private int _lastStartN;
-        private int _lastStep;
-
         private CheckBox _chkPractical;
         private CheckBox _chkTheoretical;
 
@@ -45,21 +40,16 @@ namespace Laba_1
 
         private ComboBox _cbAlgorithms;
 
-        // 2D график (с библиотекой LiveChartsCore) 
-        private CartesianChart _chart2D;
-        private readonly ObservableCollection<ObservablePoint> _chartValues = new();
-        private readonly ObservableCollection<ObservablePoint> _theoreticalValues = new(); // Коллекция для теоретических замеров
-
-        // 3D график (Canvas) — для матричных операций
-        private Canvas _canvas3D;
-        private StackPanel _legendPanel3D;
-        private TextBlock _txtMinZ;
-        private TextBlock _txtMaxZ;
+        private Chart2DService _chart2DService;
+        private Chart3DService _chart3DService;
 
         public MainWindow()
         {
             InitializeComponent();
             InitLayerControls();
+            
+            _chart2DService = new Chart2DService();
+            _chart3DService = new Chart3DService(_chkPractical, _chkTheoretical);
 
             _ = AppDbContext.InitDatabaseAsync();
 
@@ -97,10 +87,7 @@ namespace Laba_1
 
         private void OnLayerToggle_Click(object sender, RoutedEventArgs e)
         {
-            if (_lastZData != null)
-            {
-                DrawMatrix3DSurface(_lastZData, _lastCount, _lastStartN, _lastStep);
-            }
+            _chart3DService.RedrawLast();
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -195,40 +182,21 @@ namespace Laba_1
 
             controlsPanel.Children.Add(_cbAlgorithms);
 
-            _txtStartN = AddInputField("Старт (N):", "1", controlsPanel);
-            _txtEndN = AddInputField("Конец (N):", "100", controlsPanel);
-            _txtStep = AddInputField("Шаг (Step):", "10", controlsPanel);
+            _txtStartN = UiComponentsFactory.AddInputField("Старт (N):", "1", controlsPanel);
+            _txtEndN = UiComponentsFactory.AddInputField("Конец (N):", "100", controlsPanel);
+            _txtStep = UiComponentsFactory.AddInputField("Шаг (Step):", "10", controlsPanel);
 
-            _btnStart = new Button
-            {
-                Content = " Начать замер ",
-                Height = 30,
-                Padding = new Thickness(10, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Bottom
-            };
-            _btnStart.Click += BtnStart_Click;
+            // Кнопка "Начать замер"
+            _btnStart = UiComponentsFactory.CreateActionButton(" Начать замер ", BtnStart_Click);
             controlsPanel.Children.Add(_btnStart);
 
-            _btnStop = new Button
-            {
-                Content = " Стоп ",
-                Height = 30,
-                Margin = new Thickness(6, 0, 0, 0),
-                Padding = new Thickness(10, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Bottom,
-                IsEnabled = false
-            };
-            _btnStop.Click += BtnStop_Click;
+            // Кнопка "Стоп"
+            _btnStop = UiComponentsFactory.CreateActionButton(" Стоп ", BtnStop_Click, isEnabled: false);
+            _btnStop.Margin = new Thickness(6, 0, 0, 0); // Небольшой отступ от кнопки "Старт"
             controlsPanel.Children.Add(_btnStop);
 
             // Вертикальный разделитель
-            Border separator = new Border
-            {
-                Width = 1,
-                Background = Brushes.LightGray,
-                Margin = new Thickness(10, 2, 10, 2)
-            };
-            controlsPanel.Children.Add(separator);
+            controlsPanel.Children.Add(UiComponentsFactory.CreateVerticalSeparator());
 
             // Выпадающий список сохраненных замеров в БД
             StackPanel historyPanel = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
@@ -244,14 +212,7 @@ namespace Laba_1
             controlsPanel.Children.Add(historyPanel);
 
             // Кнопка загрузки сохраненного графика
-            _btnLoadHistory = new Button
-            {
-                Content = " Загрузить график ",
-                Height = 30,
-                Padding = new Thickness(10, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Bottom
-            };
-            _btnLoadHistory.Click += BtnLoadHistory_Click;
+            _btnLoadHistory = UiComponentsFactory.CreateActionButton(" Загрузить график ", BtnLoadHistory_Click);
             controlsPanel.Children.Add(_btnLoadHistory);
 
             groupBox.Content = controlsPanel;
@@ -274,66 +235,14 @@ namespace Laba_1
             TabItem tabCharts = new TabItem { Header = " График " };
             Grid displayGrid = new Grid();
 
-            _chart2D = new CartesianChart
-            {
-                IsHitTestVisible = false,
-                TooltipPosition = LiveChartsCore.Measure.TooltipPosition.Hidden,
-                Series = new ISeries[]
-                {
-                    // Практический замер
-                    new LineSeries<ObservablePoint>
-                    {
-                        Values = _chartValues,
-                        Name = "Фактический график",
-                        Fill = null,
-                        GeometrySize = 6,
-                        EnableNullSplitting = false
-                    },
-
-                    // Теоретический график
-                    new LineSeries<ObservablePoint>
-                    {
-                        Values = _theoreticalValues,
-                        Name = "Идеальный график",
-                        Fill = null,
-                        GeometrySize = 0, // Без кружков, только линия
-                        Stroke = new SolidColorPaint(SKColors.Crimson) { StrokeThickness = 2 },
-                        EnableNullSplitting = false
-                    }
-                },
-                XAxes = new Axis[] { new Axis { Name = "Размер N" } },
-                YAxes = new Axis[] { new Axis { Name = "Время (мс)" } },
-                Visibility = Visibility.Visible
-            };
-            displayGrid.Children.Add(_chart2D);
+            // Подключаем 2D график из сервиса
+            displayGrid.Children.Add(_chart2DService.Chart);
 
             Grid container3D = new Grid { Visibility = Visibility.Collapsed };
 
-            _canvas3D = new Canvas
-            {
-                Background = Brushes.White,
-                Width = 750,
-                Height = 500,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            container3D.Children.Add(_canvas3D);
-
-            _legendPanel3D = new StackPanel
-            {
-                Orientation = Orientation.Vertical,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(15),
-                Visibility = Visibility.Hidden
-            };
-            _txtMaxZ = new TextBlock { FontWeight = FontWeights.Bold, Foreground = Brushes.DarkRed };
-            _txtMinZ = new TextBlock { FontWeight = FontWeights.Bold, Foreground = Brushes.DarkBlue };
-            _legendPanel3D.Children.Add(new TextBlock { Text = "Макс. время (мс):" });
-            _legendPanel3D.Children.Add(_txtMaxZ);
-            _legendPanel3D.Children.Add(new TextBlock { Text = "Мин. время (мс):", Margin = new Thickness(0, 5, 0, 0) });
-            _legendPanel3D.Children.Add(_txtMinZ);
-            container3D.Children.Add(_legendPanel3D);
+            // Подключаем Canvas типа 3D график
+            container3D.Children.Add(_chart3DService.Canvas);
+            container3D.Children.Add(_chart3DService.LegendPanel);
 
             displayGrid.Children.Add(container3D);
             tabCharts.Content = displayGrid;
@@ -342,22 +251,8 @@ namespace Laba_1
             // Вкладка 2: Вывод детальных результатов из базы данных (DataGrid)
             TabItem tabData = new TabItem { Header = " Таблица замеров (БД) " };
 
-            _dgResults = new DataGrid
-            {
-                AutoGenerateColumns = false,
-                IsReadOnly = true,
-                GridLinesVisibility = DataGridGridLinesVisibility.All,
-                HeadersVisibility = DataGridHeadersVisibility.Column,
-                CanUserSortColumns = true,
-                Background = Brushes.White
-            };
-
-            // Колонки таблицы
-            _dgResults.Columns.Add(new DataGridTextColumn { Header = "Запуск №", Binding = new Binding("RunNumber") });
-            _dgResults.Columns.Add(new DataGridTextColumn { Header = "Размер N", Binding = new Binding("N") });
-            _dgResults.Columns.Add(new DataGridTextColumn { Header = "Время (мс)", Binding = new Binding("ExecutionTimeMs") { StringFormat = "{0:F4}" } });
-            _dgResults.Columns.Add(new DataGridTextColumn { Header = "Шаги (StepCount)", Binding = new Binding("StepCount") });
-            _dgResults.Columns.Add(new DataGridTextColumn { Header = "Дата эксперимента", Binding = new Binding("ExperimentDate") { StringFormat = "{0:dd.MM.yyyy HH:mm:ss}" } });
+            // Используем фабрику вместо ручной сборки DataGrid
+            _dgResults = UiComponentsFactory.CreateResultsDataGrid();
 
             tabData.Content = _dgResults;
             tabControl.Items.Add(tabData);
@@ -399,8 +294,7 @@ namespace Laba_1
                 // Вывод списка всех замеров текущей сессии в DataGrid на UI
                 _dgResults.ItemsSource = records;
 
-                _chartValues.Clear();
-                _theoreticalValues.Clear();
+                _chart2DService.Clear();
 
                 // 1. Определение типа графика
                 bool is3D = selectedSession.AlgorithmName.Contains("3D") || selectedSession.AlgorithmName.Contains("матриц");
@@ -416,8 +310,8 @@ namespace Laba_1
                 }
 
                 // 3. Устанавливаем видимость контейнеров 2D и 3D
-                _chart2D.Visibility = is3D ? Visibility.Collapsed : Visibility.Visible;
-                if (_canvas3D.Parent is Grid container3D)
+                _chart2DService.Chart.Visibility = is3D ? Visibility.Collapsed : Visibility.Visible;
+                if (_chart3DService.Canvas.Parent is Grid container3D)
                 {
                     container3D.Visibility = is3D ? Visibility.Visible : Visibility.Collapsed;
                 }
@@ -435,10 +329,10 @@ namespace Laba_1
 
                         foreach (var pt in aggregatedPoints)
                         {
-                            _chartValues.Add(pt);
+                            _chart2DService.ChartValues.Add(pt);
                         }
 
-                        CalculateTheoreticalCurve(selectedSession.AlgorithmName, aggregatedPoints);
+                        _chart2DService.CalculateTheoreticalCurve(selectedSession.AlgorithmName, aggregatedPoints);
                     }
                     else
                     {
@@ -471,7 +365,7 @@ namespace Laba_1
                                 }
                             }
 
-                            DrawMatrix3DSurface(zData, count, startN, step);
+                            _chart3DService.DrawSurface(zData, count, startN, step);
                         }
                     }
                 }, System.Windows.Threading.DispatcherPriority.Render);
@@ -485,22 +379,10 @@ namespace Laba_1
             }
         }
 
-        private TextBox AddInputField(string label, string defaultValue, StackPanel container)
-        {
-            StackPanel fieldGroup = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
-            fieldGroup.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 4) });
-
-            TextBox input = new TextBox { Text = defaultValue, Width = 60 };
-            fieldGroup.Children.Add(input);
-
-            container.Children.Add(fieldGroup);
-            return input;
-        }
-
         private void CbAlgorithms_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             // Защита от NullReferenceException во время инициализации UI
-            if (_cbAlgorithms == null || _chart2D == null || _txtStartN == null || _txtStep == null)
+            if (_cbAlgorithms == null || _chart2DService == null || _txtStartN == null || _txtStep == null)
                 return;
 
             int index = _cbAlgorithms.SelectedIndex;
@@ -509,8 +391,8 @@ namespace Laba_1
             bool isMatrix3D = IsMatrixAlgorithm(index);
 
             // Управление отображением 2D / 3D графиков
-            _chart2D.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
-            if (_canvas3D?.Parent is Grid container3D)
+            _chart2DService.Chart.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
+            if (_chart3DService.Canvas?.Parent is Grid container3D)
             {
                 container3D.Visibility = isMatrix3D ? Visibility.Visible : Visibility.Collapsed;
             }
@@ -666,8 +548,7 @@ namespace Laba_1
         }
         private async Task<List<BenchmarkResult>> RunMatrix3DBenchmarkAsync(int startN, int endN, int step, bool bypassCache, CancellationToken token)
         {
-            _canvas3D.Children.Clear();
-            _legendPanel3D.Visibility = Visibility.Hidden;
+            _chart3DService.Clear();
 
             int count = ((endN - startN) / step) + 1;
             double[,] zData = new double[count, count];
@@ -727,14 +608,13 @@ namespace Laba_1
 
             if (token.IsCancellationRequested) return null;
 
-            DrawMatrix3DSurface(zData, count, startN, step);
+            _chart3DService.DrawSurface(zData, count, startN, step);
             return newDbResults;
         }
 
         private async Task<List<BenchmarkResult>> RunArray2DBenchmarkAsync(int algorithmIndex, int startN, int endN, int step, bool bypassCache, CancellationToken token)
         {
-            _chartValues.Clear();
-            _theoreticalValues.Clear();
+            _chart2DService.Clear();
             string algName = _cbAlgorithms.SelectedItem.ToString();
             List<BenchmarkResult> newDbResults = new List<BenchmarkResult>();
             DateTime experimentTimestamp = DateTime.UtcNow;
@@ -756,7 +636,7 @@ namespace Laba_1
                 for (int i = 0; i < 10; i++)
                 {
                     if (token.IsCancellationRequested) break;
-                    ExecuteAlgorithm(algorithmIndex, warmupInt, warmupDouble, warmupSize);
+                    AlgorithmExecutor.Execute(algorithmIndex, warmupInt, warmupDouble, warmupSize);
                 }
 
                 List<ObservablePoint> results = new List<ObservablePoint>();
@@ -798,7 +678,7 @@ namespace Laba_1
                         for (int i = 0; i < n; i++) doubleData[i] = intData[i];
 
                         long startTicks = Stopwatch.GetTimestamp();
-                        long steps = ExecuteAlgorithm(algorithmIndex, intData, doubleData, n);
+                        long steps = AlgorithmExecutor.Execute(algorithmIndex, intData, doubleData, n);
                         long endTicks = Stopwatch.GetTimestamp();
 
                         lastSteps = steps;
@@ -833,467 +713,17 @@ namespace Laba_1
 
                 Dispatcher.Invoke(() =>
                 {
-                    if (_chart2D.YAxes.FirstOrDefault() is Axis yAxis)
-                    {
-                        yAxis.Name = isStepBased ? "Количество операций (шагов)" : "Время (мс)";
-                    }
+                    _chart2DService.SetYAxisTitle(isStepBased ? "Количество операций (шагов)" : "Время (мс)");
 
-                    foreach (var pt in results) _chartValues.Add(pt);
+                    foreach (var pt in results) _chart2DService.ChartValues.Add(pt);
 
-                    CalculateTheoreticalCurve(algName, results);
+                    _chart2DService.CalculateTheoreticalCurve(algName, results);
                 });
             }, token);
 
             if (token.IsCancellationRequested) return null;
 
             return newDbResults;
-        }
-
-        private long ExecuteAlgorithm(int algorithmIndex, int[] intData, double[] doubleData, int n)
-        {
-            switch (algorithmIndex)
-            {
-                case 0:
-                    Algorithms.Constant(intData, n);
-                    return 1;
-
-                case 1:
-                    Algorithms.Sum(intData, n);
-                    return n;
-
-                case 2:
-                    Algorithms.Product(intData, n);
-                    return n;
-
-                case 3:
-                    Algorithms.PolyNaive(doubleData, 1.5, n);
-                    return (long)n * n;
-
-                case 4:
-                    Algorithms.PolyHorner(doubleData, 1.5, n);
-                    return n;
-
-                case 5:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.BubbleSort(copy, n);
-                        return (long)n * n;
-                    }
-
-                case 6:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.QuickSort(copy, n);
-                        return (long)(n * Math.Log2(n));
-                    }
-
-                case 7:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.TimSort(copy, n);
-                        return (long)(n * Math.Log2(n));
-                    }
-
-                case 9:
-                    Algorithms.HasDuplicates(intData, n);
-                    return n;
-
-                case 10:
-                    {
-                        int[] copy = new int[n];
-                        Array.Copy(intData, copy, n);
-                        Algorithms.ReverseArray(copy, n);
-                        return n / 2;
-                    }
-
-                case 11:
-                    {
-                        int[] copy = new int[n];
-                        Array.Copy(intData, copy, n);
-                        Algorithms.ShellSort(copy, n);
-                        return (long)(n * Math.Log2(n));
-                    }
-
-                case 12:
-                    Algorithms.ResetSteps();
-                    Algorithms.PowIterative(1.0001, n);
-                    return Algorithms.StepCount;
-
-                case 13:
-                    Algorithms.ResetSteps();
-                    Algorithms.PowRecursiveSafe(1.0001, n);
-                    return Algorithms.StepCount;
-
-                case 14:
-                    Algorithms.ResetSteps();
-                    Algorithms.PowBinary(1.0001, n);
-                    return Algorithms.StepCount;
-
-                default:
-                    return -1;
-            }
-        }
-
-        private (Func<double, double> Func, string Label) GetComplexityInfo(string algorithmName)
-        {
-            if (algorithmName.Contains("Постоянная"))
-                return (n => 1.0, "O(1)");
-
-            if (algorithmName.Contains("Bubble") || algorithmName.Contains("HasDuplicates") || algorithmName.Contains("Прямое вычисление"))
-                return (n => n * n, "O(N²)");
-
-            if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort") || algorithmName.Contains("Shell"))
-                return (n => n * Math.Log2(Math.Max(n, 1)), "O(N log N)");
-
-            if (algorithmName.Contains("быстрый") || algorithmName.Contains("бинарный") || algorithmName.Contains("PowBinary"))
-                return (n => Math.Log2(Math.Max(n, 1)), "O(log N)");
-
-            return (n => n, "O(N)");
-        }
-
-        private void CalculateTheoreticalCurve(string algorithmName, IEnumerable<ObservablePoint> actualPoints)
-        {
-            _theoreticalValues.Clear();
-            var pointsList = actualPoints?.Where(p => p.X.HasValue && p.Y.HasValue).ToList();
-            if (pointsList == null || pointsList.Count == 0) return;
-
-            var (complexityFunc, label) = GetComplexityInfo(algorithmName);
-
-            var maxPoint = pointsList.OrderBy(p => p.X.Value).LastOrDefault();
-            if (maxPoint == null) return;
-
-            double maxN = maxPoint.X.Value;
-            double maxY = maxPoint.Y.Value;
-            double theoreticalMax = complexityFunc(maxN);
-
-            if (theoreticalMax <= 0) theoreticalMax = 1;
-
-            double k = maxY / theoreticalMax;
-
-            foreach (var point in pointsList.OrderBy(p => p.X.Value))
-            {
-                double n = point.X.Value;
-                double idealTime = k * complexityFunc(n);
-                _theoreticalValues.Add(new ObservablePoint(n, idealTime));
-            }
-
-            if (_chart2D.Series.ElementAtOrDefault(1) is LineSeries<ObservablePoint> idealSeries)
-            {
-                idealSeries.Name = $"Идеальный {label}";
-            }
-        }
-
-        private void DrawMatrix3DSurface(double[,] zData, int count, int startN, int step)
-        {
-            _lastZData = zData;
-            _lastCount = count;
-            _lastStartN = startN;
-            _lastStep = step;
-
-            _canvas3D.Children.Clear();
-
-            if (_chkPractical != null && _chkTheoretical != null)
-            {
-                if (_chkPractical.Parent is Panel oldParent1)
-                {
-                    oldParent1.Children.Remove(_chkPractical);
-                }
-                if (_chkTheoretical.Parent is Panel oldParent2)
-                {
-                    oldParent2.Children.Remove(_chkTheoretical);
-                }
-
-                StackPanel innerPanel = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal
-                };
-                innerPanel.Children.Add(_chkPractical);
-                innerPanel.Children.Add(_chkTheoretical);
-
-                Border layersPanel = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
-                    Padding = new Thickness(8),
-                    CornerRadius = new CornerRadius(3),
-                    Child = innerPanel
-                };
-
-                Canvas.SetLeft(layersPanel, 10);
-                Canvas.SetTop(layersPanel, 10);
-                _canvas3D.Children.Add(layersPanel);
-            }
-
-            double minZ = double.MaxValue;
-            double maxZ = double.MinValue;
-
-            for (int i = 0; i < count; i++)
-            {
-                for (int j = 0; j < count; j++)
-                {
-                    if (zData[i, j] < minZ) minZ = zData[i, j];
-                    if (zData[i, j] > maxZ) maxZ = zData[i, j];
-                }
-            }
-
-            if (maxZ == minZ) maxZ = minZ + 1;
-
-            _txtMinZ.Text = $"{minZ:F2}";
-            _txtMaxZ.Text = $"{maxZ:F2}";
-            _legendPanel3D.Visibility = Visibility.Visible;
-
-            DrawAxes(count, startN, step, minZ, maxZ);
-
-            if (_chkPractical?.IsChecked == true)
-            {
-                for (int i = count - 2; i >= 0; i--)
-                {
-                    for (int j = 0; j < count - 1; j++)
-                    {
-                        Point p1 = GetIsometricProjection(i, j, zData[i, j], count, minZ, maxZ);
-                        Point p2 = GetIsometricProjection(i + 1, j, zData[i + 1, j], count, minZ, maxZ);
-                        Point p3 = GetIsometricProjection(i + 1, j + 1, zData[i + 1, j + 1], count, minZ, maxZ);
-                        Point p4 = GetIsometricProjection(i, j + 1, zData[i, j + 1], count, minZ, maxZ);
-
-                        double avgZ = (zData[i, j] + zData[i + 1, j] + zData[i + 1, j + 1] + zData[i, j + 1]) / 4.0;
-                        double normalizedZ = (avgZ - minZ) / (maxZ - minZ);
-
-                        Polygon polygon = new Polygon
-                        {
-                            Points = new PointCollection { p1, p2, p3, p4 },
-                            Fill = new SolidColorBrush(GetHeatmapColor(normalizedZ)),
-                            Stroke = new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)),
-                            StrokeThickness = 0.5,
-                            StrokeLineJoin = PenLineJoin.Round
-                        };
-
-                        _canvas3D.Children.Add(polygon);
-                    }
-                }
-            }
-
-            if (_chkTheoretical?.IsChecked == true)
-            {
-                DrawTheoreticalWireframe3D(zData, count, startN, step, minZ, maxZ);
-            }
-        }
-
-        private void DrawTheoreticalWireframe3D(double[,] zData, int count, int startN, int step, double minZ, double maxZ)
-        {
-            int lastIdx = count - 1;
-            int maxRowsA = startN + lastIdx * step;
-            int maxColsA = startN + lastIdx * step;
-            int maxColsB = maxRowsA;
-            long maxOps = (long)maxRowsA * maxColsA * maxColsB;
-
-            double maxPracticalZ = zData[lastIdx, lastIdx];
-            double k = maxOps > 0 ? maxPracticalZ / maxOps : 0;
-
-            double[,] zTheory = new double[count, count];
-            for (int i = 0; i < count; i++)
-            {
-                int rowsA = startN + i * step;
-                for (int j = 0; j < count; j++)
-                {
-                    int colsA = startN + j * step;
-                    int colsB = rowsA;
-                    long ops = (long)rowsA * colsA * colsB;
-                    zTheory[i, j] = k * ops;
-                }
-            }
-
-            int gridStep = Math.Max(1, count / 12);
-
-            for (int i = 0; i < count; i += gridStep)
-            {
-                for (int j = 0; j < count; j += gridStep)
-                {
-                    Point current = GetIsometricProjection(i, j, zTheory[i, j], count, minZ, maxZ);
-
-                    int nextJ = j + gridStep;
-                    if (nextJ < count)
-                    {
-                        Point nextX = GetIsometricProjection(i, nextJ, zTheory[i, nextJ], count, minZ, maxZ);
-                        DrawDashedLine(current, nextX);
-                    }
-
-                    int nextI = i + gridStep;
-                    if (nextI < count)
-                    {
-                        Point nextY = GetIsometricProjection(nextI, j, zTheory[nextI, j], count, minZ, maxZ);
-                        DrawDashedLine(current, nextY);
-                    }
-                }
-            }
-        }
-
-        private void DrawDashedLine(Point p1, Point p2)
-        {
-            Line line = new Line
-            {
-                X1 = p1.X,
-                Y1 = p1.Y,
-                X2 = p2.X,
-                Y2 = p2.Y,
-                Stroke = Brushes.Crimson,
-                StrokeThickness = 1.2,
-                StrokeDashArray = new DoubleCollection() { 3, 2 }
-            };
-            _canvas3D.Children.Add(line);
-        }
-
-        private void DrawAxes(int count, int startN, int step, double minZ, double maxZ)
-        {
-            Point p00 = GetIsometricProjection(0, 0, minZ, count, minZ, maxZ);
-            Point pN0 = GetIsometricProjection(count - 1, 0, minZ, count, minZ, maxZ);
-            Point pNN = GetIsometricProjection(count - 1, count - 1, minZ, count, minZ, maxZ);
-            Point p0N = GetIsometricProjection(0, count - 1, minZ, count, minZ, maxZ);
-
-            Polygon floor = new Polygon
-            {
-                Points = new PointCollection { p00, pN0, pNN, p0N },
-                Fill = new SolidColorBrush(Color.FromArgb(15, 0, 0, 0)),
-                Stroke = Brushes.LightGray,
-                StrokeThickness = 1
-            };
-            _canvas3D.Children.Add(floor);
-
-            double extCount = (count - 1) * 1.05;
-            Point origin = p00;
-            Point xAxis = GetIsometricProjection(extCount, 0, minZ, count, minZ, maxZ);
-            Point yAxis = GetIsometricProjection(0, extCount, minZ, count, minZ, maxZ);
-
-            double zExt = maxZ + (maxZ - minZ) * 0.1;
-            Point zAxis = GetIsometricProjection(0, 0, zExt, count, minZ, maxZ);
-
-            Line CreateLine(Point p1, Point p2, Brush color, double thickness = 2) =>
-                new Line { X1 = p1.X, Y1 = p1.Y, X2 = p2.X, Y2 = p2.Y, Stroke = color, StrokeThickness = thickness };
-
-            _canvas3D.Children.Add(CreateLine(origin, xAxis, Brushes.Crimson));
-            _canvas3D.Children.Add(CreateLine(origin, yAxis, Brushes.SeaGreen));
-            _canvas3D.Children.Add(CreateLine(origin, zAxis, Brushes.RoyalBlue));
-
-            AddLabelToCanvas("Ось X (Строки)", xAxis, Brushes.Crimson, -40, 15);
-            AddLabelToCanvas("Ось Y (Столбцы)", yAxis, Brushes.SeaGreen, 10, -5);
-            AddLabelToCanvas("Ось Z (Время, мс)", zAxis, Brushes.RoyalBlue, -45, -25);
-
-            int ticksCount = Math.Min(5, count - 1);
-            if (ticksCount <= 0) ticksCount = 1;
-            double stepIdx = (double)(count - 1) / ticksCount;
-
-            for (int i = 0; i <= ticksCount; i++)
-            {
-                double idxVal = i * stepIdx;
-                Point pOnAxis = GetIsometricProjection(idxVal, 0, minZ, count, minZ, maxZ);
-
-                Point pTickEnd = new Point(pOnAxis.X - 4, pOnAxis.Y + 6);
-                _canvas3D.Children.Add(CreateLine(pOnAxis, pTickEnd, Brushes.Crimson, 1.5));
-
-                int actualN = (int)Math.Round(startN + idxVal * step);
-                AddTickLabel(actualN.ToString(), pTickEnd, Brushes.Crimson, -12, 5);
-            }
-
-            for (int j = 0; j <= ticksCount; j++)
-            {
-                double idxVal = j * stepIdx;
-                Point pOnAxis = GetIsometricProjection(0, idxVal, minZ, count, minZ, maxZ);
-
-                Point pTickEnd = new Point(pOnAxis.X, pOnAxis.Y + 7);
-                _canvas3D.Children.Add(CreateLine(pOnAxis, pTickEnd, Brushes.SeaGreen, 1.5));
-
-                int actualN = (int)Math.Round(startN + idxVal * step);
-                AddTickLabel(actualN.ToString(), pTickEnd, Brushes.SeaGreen, -6, 8);
-            }
-
-            for (int k = 0; k <= ticksCount; k++)
-            {
-                double zVal = minZ + k * (maxZ - minZ) / ticksCount;
-                Point pOnAxis = GetIsometricProjection(0, 0, zVal, count, minZ, maxZ);
-
-                Point pTickEnd = new Point(pOnAxis.X - 7, pOnAxis.Y);
-                _canvas3D.Children.Add(CreateLine(pOnAxis, pTickEnd, Brushes.RoyalBlue, 1.5));
-
-                AddTickLabel($"{zVal:F1}", pTickEnd, Brushes.RoyalBlue, -38, -7);
-            }
-        }
-
-        private void AddTickLabel(string text, Point p, Brush color, double offsetX, double offsetY)
-        {
-            TextBlock tb = new TextBlock
-            {
-                Text = text,
-                Foreground = color,
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold
-            };
-            Canvas.SetLeft(tb, p.X + offsetX);
-            Canvas.SetTop(tb, p.Y + offsetY);
-            _canvas3D.Children.Add(tb);
-        }
-
-        private void AddLabelToCanvas(string text, Point p, Brush color, double offsetX, double offsetY)
-        {
-            TextBlock tb = new TextBlock
-            {
-                Text = text,
-                Foreground = color,
-                FontWeight = FontWeights.Bold,
-                FontSize = 13
-            };
-            Canvas.SetLeft(tb, p.X + offsetX);
-            Canvas.SetTop(tb, p.Y + offsetY);
-            _canvas3D.Children.Add(tb);
-        }
-
-        private Point GetIsometricProjection(double x, double y, double z, int count, double minZ, double maxZ)
-        {
-            double normX = count > 1 ? x / (count - 1) : 0;
-            double normY = count > 1 ? y / (count - 1) : 0;
-            double normZ = (z - minZ) / (maxZ - minZ);
-
-            double angleX = Math.PI / 6;
-
-            double isoX = normY + (normX * Math.Cos(angleX));
-            double isoY = -(normX * Math.Sin(angleX)) - (normZ * 0.4);
-
-            double canvasWidth = _canvas3D.Width;
-            double canvasHeight = _canvas3D.Height;
-
-            double finalX = (canvasWidth * 0.25) - 150 + (isoX * canvasWidth * 0.55);
-            double finalY = (canvasHeight * 0.7) + 130 + (isoY * canvasHeight * 0.70);
-
-            return new Point(finalX, finalY);
-        }
-
-        private Color GetHeatmapColor(double value)
-        {
-            value = Math.Max(0, Math.Min(1, value));
-            byte r = 0, g = 0, b = 0;
-
-            if (value <= 0.25)
-            {
-                double t = value / 0.25;
-                r = 0; g = (byte)(255 * t); b = 255;
-            }
-            else if (value <= 0.5)
-            {
-                double t = (value - 0.25) / 0.25;
-                r = 0; g = 255; b = (byte)(255 * (1 - t));
-            }
-            else if (value <= 0.75)
-            {
-                double t = (value - 0.5) / 0.25;
-                r = (byte)(255 * t); g = 255; b = 0;
-            }
-            else
-            {
-                double t = 255;
-                r = 255; g = (byte)(255 * (1 - (value - 0.75) / 0.25)); b = 0;
-            }
-
-            return Color.FromRgb(r, g, b);
         }
     }
 }
