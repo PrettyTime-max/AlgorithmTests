@@ -97,12 +97,96 @@ namespace Laba_1
             return i + 1;
         }
         // 7 Timsort
-        public static void TimSort(double[] v)
+        public static void TimSort(double[] v){
+        int n = v.Length;
+
+        if (n <= 1)
         {
-            Array.Sort(v);
+            return;
         }
 
+        const int RUN = 32;
 
+        for (int i = 0; i < n; i += RUN)
+        {
+            int right = Math.Min(i + RUN - 1, n - 1);
+            InsertionSort(v, i, right);
+        }
+
+        for (int size = RUN; size < n; size = 2 * size)
+        {
+            for (int left = 0; left < n; left += 2 * size)
+            {
+                int mid = left + size - 1;
+                int right = Math.Min(left + 2 * size - 1, n - 1);
+
+                if (mid < right)
+                {
+                    Merge(v, left, mid, right);
+                }
+            }
+        }
+        private static void InsertionSort(double[] v, int left, int right)
+        {
+            for (int i = left + 1; i <= right; i++)
+            {
+                double temp = v[i];
+                int j = i - 1;
+    
+                while (j >= left && v[j] > temp)
+                {
+                    v[j + 1] = v[j];
+                    j--;
+                }
+                
+                v[j + 1] = temp;
+            }
+        }
+        private static void Merge(double[] v, int left, int mid, int right)
+        {
+            int n1 = mid - left + 1;
+            int n2 = right - mid;
+    
+            double[] L = new double[n1];
+            double[] R = new double[n2];
+    
+            for (int i = 0; i < n1; i++)
+                L[i] = v[left + i];
+            for (int j = 0; j < n2; j++)
+                R[j] = v[mid + 1 + j];
+    
+            int i_ptr = 0, j_ptr = 0;
+            int k = left;
+    
+            while (i_ptr < n1 && j_ptr < n2)
+            {
+                if (L[i_ptr] <= R[j_ptr])
+                {
+                    v[k] = L[i_ptr];
+                    i_ptr++;
+                }
+                else
+                {
+                    v[k] = R[j_ptr];
+                    j_ptr++;
+                }
+                k++;
+            }
+    
+            while (i_ptr < n1)
+            {
+                v[k] = L[i_ptr];
+                i_ptr++;
+                k++;
+            }
+    
+            while (j_ptr < n2)
+            {
+                v[k] = R[j_ptr];
+                j_ptr++;
+                k++;
+            }
+        }
 
 
         // Часть II. Операции с матрицами
