@@ -99,7 +99,82 @@ namespace Laba_1
         // 7 Timsort
         public static void TimSort(double[] v, int n)
         {
-            Array.Sort(v, 0, n);
+            if (n <= 1)
+            {
+                return;
+            }
+
+            const int RUN = 32;
+
+            // Выделяем временный буфер один раз, чтобы избежать нагрузки на GC и скачков времени
+            double[] tempBuffer = new double[n];
+
+            for (int i = 0; i < n; i += RUN)
+            {
+                int right = Math.Min(i + RUN - 1, n - 1);
+                InsertionSort(v, i, right);
+            }
+
+            for (int size = RUN; size < n; size = 2 * size)
+            {
+                for (int left = 0; left < n; left += 2 * size)
+                {
+                    int mid = left + size - 1;
+                    int right = Math.Min(left + 2 * size - 1, n - 1);
+
+                    if (mid < right)
+                    {
+                        Merge(v, tempBuffer, left, mid, right);
+                    }
+                }
+            }
+        }
+
+        private static void InsertionSort(double[] v, int left, int right)
+        {
+            for (int i = left + 1; i <= right; i++)
+            {
+                double temp = v[i];
+                int j = i - 1;
+
+                while (j >= left && v[j] > temp)
+                {
+                    v[j + 1] = v[j];
+                    j--;
+                }
+
+                v[j + 1] = temp;
+            }
+        }
+
+        private static void Merge(double[] v, double[] temp, int left, int mid, int right)
+        {
+            // Быстрое копирование диапазона в буфер без создания новых массивов
+            for (int x = left; x <= right; x++)
+            {
+                temp[x] = v[x];
+            }
+
+            int i = left;
+            int j = mid + 1;
+            int k = left;
+
+            while (i <= mid && j <= right)
+            {
+                if (temp[i] <= temp[j])
+                {
+                    v[k++] = temp[i++];
+                }
+                else
+                {
+                    v[k++] = temp[j++];
+                }
+            }
+
+            while (i <= mid)
+            {
+                v[k++] = temp[i++];
+            }
         }
 
 
