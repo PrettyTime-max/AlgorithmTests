@@ -27,6 +27,8 @@ namespace Laba_1
         private Button _btnStart;
         private Button _btnStop;
 
+        private Label _lblEndN;
+
         private CheckBox _chkPractical;
         private CheckBox _chkTheoretical;
 
@@ -280,11 +282,14 @@ namespace Laba_1
         // Загрузка графика выбранного замера из БД
         private async void BtnLoadHistory_Click(object sender, RoutedEventArgs e)
         {
+
             if (_cbHistory.SelectedItem is not ExperimentSession selectedSession)
             {
                 MessageBox.Show("Выберите замер из списка истории.", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
+
+            SetControlsEnabled(false);
 
             try
             {
@@ -321,10 +326,21 @@ namespace Laba_1
                 {
                     if (!is3D)
                     {
+                        // Определяем, степенной ли это алгоритм по наличию StepCount или названию
+                        bool isStepBased = records.Any(r => r.StepCount.HasValue) ||
+                                           selectedSession.AlgorithmName.Contains("степень");
+
+                        // Устанавливаем правильные заголовки осей
+                        _chart2DService.SetYAxisTitle(isStepBased ? "Количество операций (шагов)" : "Время (мс)");
+                        _chart2DService.SetXAxisTitle(isStepBased ? "Показатель степени (N)" : "Размер массива (N)");
+
                         var aggregatedPoints = records
                             .GroupBy(r => r.N)
                             .OrderBy(g => g.Key)
-                            .Select(g => new ObservablePoint(g.Key, g.Average(r => r.ExecutionTimeMs)))
+                            .Select(g => new ObservablePoint(
+                                g.Key,
+                                isStepBased ? (g.First().StepCount ?? 0) : g.Average(r => r.ExecutionTimeMs)
+                            ))
                             .ToList();
 
                         foreach (var pt in aggregatedPoints)
@@ -377,12 +393,17 @@ namespace Laba_1
             {
                 MessageBox.Show($"Ошибка при загрузке данных из БД: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally
+            {
+
+                SetControlsEnabled(true);
+            }
         }
 
         private void CbAlgorithms_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             // Защита от NullReferenceException во время инициализации UI
-            if (_cbAlgorithms == null || _chart2DService == null || _txtStartN == null || _txtStep == null)
+            if (_cbAlgorithms == null || _chart2DService == null || _txtStartN == null || _txtStep == null || _txtEndN == null)
                 return;
 
             int index = _cbAlgorithms.SelectedIndex;
@@ -407,15 +428,45 @@ namespace Laba_1
 
                 _txtStep.IsEnabled = false;
                 _txtStep.Text = "1";
+
+                _txtEndN.ToolTip = "Максимальный показатель степени";
+
+                // Находим текстовую метку перед полем _txtEndN и меняем текст
+                if (_txtEndN.Parent is StackPanel parentPanel)
+                {
+                    int indexInParent = parentPanel.Children.IndexOf(_txtEndN);
+                    if (indexInParent > 0 && parentPanel.Children[indexInParent - 1] is TextBlock lbl)
+                    {
+                        lbl.Text = "Степень (до):";
+                    }
+                }
             }
             else
             {
                 _txtStartN.IsEnabled = true;
                 _txtStep.IsEnabled = true;
+                _txtEndN.ToolTip = "Конечный размер данных N";
+
+                // Возвращаем стандартный текст метки для остальных алгоритмов
+                if (_txtEndN.Parent is StackPanel parentPanel)
+                {
+                    int indexInParent = parentPanel.Children.IndexOf(_txtEndN);
+                    if (indexInParent > 0 && parentPanel.Children[indexInParent - 1] is TextBlock lbl)
+                    {
+                        lbl.Text = "Конец (N):";
+                    }
+                }
             }
         }
 
         private bool IsMatrixAlgorithm(int index) => index == 8;
+
+        private void SetControlsEnabled(bool isEnabled)
+        {
+            if (_btnStart != null) _btnStart.IsEnabled = isEnabled;
+            if (_btnLoadHistory != null) _btnLoadHistory.IsEnabled = isEnabled;
+            if (_cbAlgorithms != null) _cbAlgorithms.IsEnabled = isEnabled;
+        }
 
         private async void BtnStart_Click(object sender, RoutedEventArgs e)
         {
@@ -501,8 +552,8 @@ namespace Laba_1
 
             // 5. Выполнение нового замера (если замера в БД не было или нажат "Нет")
             _cts = new CancellationTokenSource();
-            _btnStart.IsEnabled = false;
-            _btnStop.IsEnabled = true;
+            SetControlsEnabled(false); // Замораживаем старт, загрузку истории и комбобокс
+            _btnStop.IsEnabled = true;   // Кнопка "Стоп" должна быть доступна
             _progressBar.Visibility = Visibility.Visible;
             _progressBar.IsIndeterminate = true;
 
@@ -540,7 +591,7 @@ namespace Laba_1
             finally
             {
                 _progressBar.Visibility = Visibility.Collapsed;
-                _btnStart.IsEnabled = true;
+                SetControlsEnabled(true); // Размораживаем всё обратно
                 _btnStop.IsEnabled = false;
                 _cts?.Dispose();
                 _cts = null;
@@ -714,6 +765,7 @@ namespace Laba_1
                 Dispatcher.Invoke(() =>
                 {
                     _chart2DService.SetYAxisTitle(isStepBased ? "Количество операций (шагов)" : "Время (мс)");
+                    _chart2DService.SetXAxisTitle(isStepBased ? "Показатель степени (N)" : "Размер массива (N)");
 
                     foreach (var pt in results) _chart2DService.ChartValues.Add(pt);
 

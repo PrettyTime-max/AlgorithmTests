@@ -1,4 +1,4 @@
-﻿using LiveChartsCore;
+﻿    using LiveChartsCore;
 using LiveChartsCore.Defaults;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
@@ -65,6 +65,14 @@ namespace Laba_1
             if (_chart.YAxes.FirstOrDefault() is Axis yAxis)
             {
                 yAxis.Name = title;
+            }
+        }
+
+        public void SetXAxisTitle(string title)
+        {
+            if (_chart.XAxes.FirstOrDefault() is Axis xAxis)
+            {
+                xAxis.Name = title;
             }
         }
 
