@@ -17,7 +17,7 @@ namespace Laba_1
         public static double Constant(int[] v)
         {
             double acc = 0;
-            const int iterations = 150_000;
+            const int iterations = 300_000;
             for (int i = 0; i < iterations; i++)
             {
                 acc += Math.Sin(i * 0.001);
