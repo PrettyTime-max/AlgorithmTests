@@ -17,26 +17,27 @@ using LiveChartsCore.SkiaSharpView.Painting;
 using SkiaSharp;
 using System.Windows.Input;
 using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
 
 namespace Laba_1
 {
     public partial class MainWindow : Window
     {
-        private TextBox _txtStartN;
-        private TextBox _txtEndN;
-        private TextBox _txtStep;
-        private TextBox _txtRuns;
-        private Button _btnStart;
-        private Button _btnStop;
+        private TextBox _txtStartN = null!;
+        private TextBox _txtEndN = null!;
+        private TextBox _txtStep = null!;
+        private TextBox _txtRuns = null!;
+        private Button _btnStart = null!;
+        private Button _btnStop = null!;
 
         // Новые элементы управления для истории БД
-        private ComboBox _cbHistory;
-        private Button _btnLoadHistory;
+        private ComboBox _cbHistory = null!;
+        private Button _btnLoadHistory = null!;
 
-        private CancellationTokenSource _cts;
-        private ProgressBar _progressBar;
+        private CancellationTokenSource? _cts;
+        private ProgressBar _progressBar = null!;
 
-        private ComboBox _cbAlgorithms;
+        private ComboBox _cbAlgorithms = null!;
 
         // 2D график (с библиотекой LiveChartsCore) 
         private Grid _container2D = null!;
@@ -47,14 +48,17 @@ namespace Laba_1
         private TextBlock _lblZoomRange = null!;
         private double _dataMinN = 1;
         private double _dataMaxN = 500;
+        private Point? _dragStartPoint = null;
+        private double _dragStartMin = 0;
+        private double _dragStartMax = 0;
         private readonly ObservableCollection<ObservablePoint> _chartValues = new();
         private readonly ObservableCollection<ObservablePoint> _theoreticalValues = new(); // Коллекция для теоретических замеров
 
         // 3D график (Canvas) — для матричных операций
-        private Canvas _canvas3D;
-        private StackPanel _legendPanel3D;
-        private TextBlock _txtMinZ;
-        private TextBlock _txtMaxZ;
+        private Canvas _canvas3D = null!;
+        private StackPanel _legendPanel3D = null!;
+        private TextBlock _txtMinZ = null!;
+        private TextBlock _txtMaxZ = null!;
         private Button _btn3DLayer = null!;
         private double[,]? _lastZDataExp;
         private double[,]? _lastZDataTheo;
@@ -64,6 +68,27 @@ namespace Laba_1
         // DB & Cache UI Elements
         private DataGrid _dbDataGrid = null!;
         private TextBlock _lblDbStats = null!;
+
+        // Elements for Comparison Tab
+        private ListBox _compareAvailableListBox = null!;
+        private ListBox _compareSelectedListBox = null!;
+        private TextBox _txtCompareStartN = null!;
+        private TextBox _txtCompareEndN = null!;
+        private TextBox _txtCompareStep = null!;
+        private TextBox _txtCompareRuns = null!;
+        private Button _btnRunCompare = null!;
+        private Button _btnStopCompare = null!;
+        private ProgressBar _compareProgressBar = null!;
+        private CartesianChart _compareChart = null!;
+        private Axis _compareXAxis = null!;
+        private Axis _compareYAxis = null!;
+        private TextBlock _lblCompareStatus = null!;
+        private double _compareDataMinN = 100;
+        private double _compareDataMaxN = 2000;
+        private CancellationTokenSource? _compareCts;
+        private Point? _compareDragStartPoint = null;
+        private double _compareDragStartMin = 0;
+        private double _compareDragStartMax = 0;
 
         public MainWindow()
         {
@@ -77,6 +102,28 @@ namespace Laba_1
             Content = BuildInterface();
 
             Loaded += MainWindow_Loaded;
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            if (PresentationSource.FromVisual(this) is HwndSource source)
+            {
+                source.AddHook(HwndHook);
+            }
+        }
+
+        private const int WM_MOUSEHWHEEL = 0x020E;
+
+        private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_MOUSEHWHEEL)
+            {
+                short delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                OnTouchpadHorizontalScroll(delta);
+                handled = true;
+            }
+            return IntPtr.Zero;
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -123,6 +170,10 @@ namespace Laba_1
             TabItem tabMain = new TabItem { Header = "📊 2D & 3D Замеры и Графики", FontWeight = FontWeights.Bold };
             tabMain.Content = BuildMainBenchmarkContent();
             tabControl.Items.Add(tabMain);
+
+            TabItem tabCompare = new TabItem { Header = "⚖️ Сравнение алгоритмов", FontWeight = FontWeights.Bold };
+            tabCompare.Content = BuildComparisonTabContent();
+            tabControl.Items.Add(tabCompare);
 
             TabItem tabDb = new TabItem { Header = "🗄️ База Данных & Кэш Памяти", FontWeight = FontWeights.Bold };
             tabDb.Content = BuildDbTabContent();
@@ -180,10 +231,11 @@ namespace Laba_1
 
             controlsPanel.Children.Add(_cbAlgorithms);
 
-            _txtStartN = AddInputField("Старт (N):", "1", controlsPanel);
+            _txtStartN = AddInputField("Старт (N):", "10", controlsPanel);
             _txtEndN = AddInputField("Конец (N):", "500", controlsPanel);
             _txtStep = AddInputField("Шаг (Step):", "10", controlsPanel);
-            _txtRuns = AddInputField("Прогоны:", "10", controlsPanel);
+            _txtRuns = AddInputField("Прогоны:", "5", controlsPanel);
+            ApplyDefaultAlgorithmParameters(0);
 
             _btnStart = new Button
             {
@@ -275,7 +327,7 @@ namespace Laba_1
 
             _lblZoomRange = new TextBlock
             {
-                Text = "🔍 Навигация: колесико мыши (зум), зажатие ЛКМ (сдвиг) или кнопки справа 👉",
+                Text = "🖐️ Тачпад: щипок (pinch) — зум, 2 пальца влево/вправо — скролл | Или перетаскивание",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
@@ -287,27 +339,18 @@ namespace Laba_1
             StackPanel navButtons = new StackPanel { Orientation = Orientation.Horizontal };
             DockPanel.SetDock(navButtons, Dock.Right);
 
-            Button btnSkipStart = CreateNavButton("⏩ Скрыть старт (первые 25%)", "#6366F1");
-            btnSkipStart.Click += (s, e) => SkipFirst25Percent();
-            navButtons.Children.Add(btnSkipStart);
-
-            Button btnPanLeft = CreateNavButton("◀ Влево", "#64748B");
-            btnPanLeft.Click += (s, e) => PanChart(-0.25);
-            navButtons.Children.Add(btnPanLeft);
-
-            Button btnPanRight = CreateNavButton("Вправо ▶", "#64748B");
-            btnPanRight.Click += (s, e) => PanChart(0.25);
-            navButtons.Children.Add(btnPanRight);
-
-            Button btnZoomIn = CreateNavButton("🔍+ Приблизить", "#0EA5E9");
-            btnZoomIn.Click += (s, e) => ZoomChart(0.7);
-            navButtons.Children.Add(btnZoomIn);
-
-            Button btnZoomOut = CreateNavButton("🔍- Отдалить", "#0EA5E9");
-            btnZoomOut.Click += (s, e) => ZoomChart(1.4);
-            navButtons.Children.Add(btnZoomOut);
-
-            Button btnResetZoom = CreateNavButton("↺ Сбросить", "#10B981");
+            Button btnResetZoom = new Button
+            {
+                Content = " ↺ Сбросить масштаб ",
+                Height = 28,
+                Padding = new Thickness(12, 0, 12, 0),
+                FontWeight = FontWeights.Bold,
+                FontSize = 12,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#10B981")),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
             btnResetZoom.Click += (s, e) => ResetChartZoom();
             navButtons.Children.Add(btnResetZoom);
 
@@ -352,10 +395,65 @@ namespace Laba_1
                 Visibility = Visibility.Visible
             };
 
-            // Отслеживание зума колесом мыши для синхронизации скроллбара
-            _chart2D.PreviewMouseWheel += (s, e) =>
+            // Мягкий зум тачпадом / колесом мыши (чувствительность снижена в 2.5-3 раза)
+            _chart2D.PreviewMouseWheel += Chart_PreviewMouseWheel;
+
+            // Плавное перетаскивание графика пальцем по тачпаду / зажатой мышью
+            _chart2D.PreviewMouseDown += (s, e) =>
             {
-                Dispatcher.InvokeAsync(UpdateScrollBarAndLabel, System.Windows.Threading.DispatcherPriority.Background);
+                if (e.LeftButton == MouseButtonState.Pressed || e.RightButton == MouseButtonState.Pressed)
+                {
+                    _dragStartPoint = e.GetPosition(_chart2D);
+                    _dragStartMin = _xAxis.MinLimit ?? _dataMinN;
+                    _dragStartMax = _xAxis.MaxLimit ?? _dataMaxN;
+                    _chart2D.CaptureMouse();
+                }
+            };
+
+            _chart2D.PreviewMouseMove += (s, e) =>
+            {
+                if (_dragStartPoint.HasValue && (e.LeftButton == MouseButtonState.Pressed || e.RightButton == MouseButtonState.Pressed))
+                {
+                    Point currentPoint = e.GetPosition(_chart2D);
+                    double deltaX = currentPoint.X - _dragStartPoint.Value.X;
+                    double chartWidth = _chart2D.ActualWidth > 0 ? _chart2D.ActualWidth : 700;
+
+                    double viewWidth = _dragStartMax - _dragStartMin;
+                    double totalRange = Math.Max(1.0, _dataMaxN - _dataMinN);
+                    if (viewWidth >= totalRange)
+                    {
+                        viewWidth = totalRange * 0.8;
+                        _dragStartMax = _dragStartMin + viewWidth;
+                    }
+
+                    double shiftN = -(deltaX / chartWidth) * viewWidth;
+                    double newMin = _dragStartMin + shiftN;
+                    double newMax = _dragStartMax + shiftN;
+
+                    if (newMin < _dataMinN)
+                    {
+                        newMin = _dataMinN;
+                        newMax = newMin + viewWidth;
+                    }
+                    if (newMax > _dataMaxN)
+                    {
+                        newMax = _dataMaxN;
+                        newMin = Math.Max(_dataMinN, newMax - viewWidth);
+                    }
+
+                    _xAxis.MinLimit = newMin;
+                    _xAxis.MaxLimit = newMax;
+                    UpdateScrollBarAndLabel();
+                }
+            };
+
+            _chart2D.PreviewMouseUp += (s, e) =>
+            {
+                if (_dragStartPoint.HasValue)
+                {
+                    _dragStartPoint = null;
+                    _chart2D.ReleaseMouseCapture();
+                }
             };
 
             Grid.SetRow(_chart2D, 1);
@@ -567,6 +665,552 @@ namespace Laba_1
             return dbGrid;
         }
 
+        private UIElement BuildComparisonTabContent()
+        {
+            Grid mainGrid = new Grid { Margin = new Thickness(12) };
+            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(380) });
+            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            // Левая панель: Выбор алгоритмов, управление, параметры
+            GroupBox controlBox = new GroupBox
+            {
+                Header = " Панель сравнения нескольких алгоритмов ",
+                FontWeight = FontWeights.Bold,
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+
+            ScrollViewer leftScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            StackPanel leftPanel = new StackPanel();
+
+            leftPanel.Children.Add(new TextBlock
+            {
+                Text = "💡 Перетаскивайте мышью (Drag & Drop) или дважды кликайте на алгоритмы, чтобы добавить в сравнение:",
+                FontSize = 11,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+                FontWeight = FontWeights.Normal
+            });
+
+            leftPanel.Children.Add(new TextBlock { Text = "Доступные алгоритмы:", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 3) });
+
+            _compareAvailableListBox = new ListBox
+            {
+                Height = 150,
+                SelectionMode = SelectionMode.Single,
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            _compareAvailableListBox.Items.Add("1. Постоянная функция");
+            _compareAvailableListBox.Items.Add("2. Сумма элементов");
+            _compareAvailableListBox.Items.Add("3. Произведение элементов");
+            _compareAvailableListBox.Items.Add("4. Прямое вычисление полинома");
+            _compareAvailableListBox.Items.Add("5. Полином по схеме Горнера");
+            _compareAvailableListBox.Items.Add("6. (Bubble Sort) Сортировка пузырьком");
+            _compareAvailableListBox.Items.Add("7. (Quick Sort) Быстрая сортировка");
+            _compareAvailableListBox.Items.Add("8. (TimSort) Сортировка элементов");
+            _compareAvailableListBox.Items.Add("10. (HasDuplicates) Проверка дубликатов");
+            _compareAvailableListBox.Items.Add("11. (ReverseArray) Разворот массива");
+            _compareAvailableListBox.Items.Add("12. (ShellSort) Сортировка Шелла");
+            _compareAvailableListBox.Items.Add("13. Простой итеративный алгоритм");
+            _compareAvailableListBox.Items.Add("14. Рекурсивный алгоритм");
+            _compareAvailableListBox.Items.Add("15. Быстрый (бинарный) алгоритм");
+
+            _compareAvailableListBox.PreviewMouseDown += CompareAvailable_PreviewMouseDown;
+            _compareAvailableListBox.PreviewMouseMove += CompareAvailable_PreviewMouseMove;
+            _compareAvailableListBox.MouseDoubleClick += (s, e) => AddSelectedToCompare();
+            leftPanel.Children.Add(_compareAvailableListBox);
+
+            // Кнопки перемещения
+            StackPanel btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 6) };
+            Button btnAdd = new Button { Content = " ➕ Добавить ", Height = 26, Margin = new Thickness(0, 0, 6, 0), FontWeight = FontWeights.Normal };
+            btnAdd.Click += (s, e) => AddSelectedToCompare();
+            btnRow.Children.Add(btnAdd);
+
+            Button btnRemove = new Button { Content = " ➖ Удалить ", Height = 26, Margin = new Thickness(0, 0, 6, 0), FontWeight = FontWeights.Normal };
+            btnRemove.Click += (s, e) => RemoveSelectedFromCompare();
+            btnRow.Children.Add(btnRemove);
+
+            Button btnClearList = new Button { Content = " 🧹 Очистить всё ", Height = 26, FontWeight = FontWeights.Normal };
+            btnClearList.Click += (s, e) => _compareSelectedListBox.Items.Clear();
+            btnRow.Children.Add(btnClearList);
+            leftPanel.Children.Add(btnRow);
+
+            leftPanel.Children.Add(new TextBlock { Text = "Выбранные алгоритмы (будут выполнены по очереди):", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 3) });
+
+            _compareSelectedListBox = new ListBox
+            {
+                Height = 130,
+                SelectionMode = SelectionMode.Single,
+                FontSize = 12,
+                AllowDrop = true,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            _compareSelectedListBox.Items.Add("6. (Bubble Sort) Сортировка пузырьком");
+            _compareSelectedListBox.Items.Add("7. (Quick Sort) Быстрая сортировка");
+            _compareSelectedListBox.Items.Add("8. (TimSort) Сортировка элементов");
+
+            _compareSelectedListBox.DragOver += (s, e) => { e.Effects = DragDropEffects.Copy; e.Handled = true; };
+            _compareSelectedListBox.Drop += CompareSelected_Drop;
+            _compareSelectedListBox.MouseDoubleClick += (s, e) => RemoveSelectedFromCompare();
+            leftPanel.Children.Add(_compareSelectedListBox);
+
+            // Блок параметров диапазона N
+            GroupBox paramsBox = new GroupBox
+            {
+                Header = " Единый диапазон измерений ",
+                FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(6),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            WrapPanel paramsWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            _txtCompareStartN = AddInputField("Старт (N):", "200", paramsWrap);
+            _txtCompareEndN = AddInputField("Конец (N):", "3000", paramsWrap);
+            _txtCompareStep = AddInputField("Шаг (Step):", "100", paramsWrap);
+            _txtCompareRuns = AddInputField("Прогоны:", "3", paramsWrap);
+            paramsBox.Content = paramsWrap;
+            leftPanel.Children.Add(paramsBox);
+
+            // Кнопки запуска
+            StackPanel runBtnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            _btnRunCompare = new Button
+            {
+                Content = " ▶ Запустить сравнение ",
+                Height = 32,
+                Padding = new Thickness(14, 0, 14, 0),
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#10B981")),
+                Cursor = Cursors.Hand
+            };
+            _btnRunCompare.Click += BtnRunComparison_Click;
+            runBtnRow.Children.Add(_btnRunCompare);
+
+            _btnStopCompare = new Button
+            {
+                Content = " ⏹ Стоп ",
+                Height = 32,
+                Padding = new Thickness(12, 0, 12, 0),
+                Margin = new Thickness(8, 0, 0, 0),
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EF4444")),
+                IsEnabled = false,
+                Cursor = Cursors.Hand
+            };
+            _btnStopCompare.Click += (s, e) => { _compareCts?.Cancel(); _btnStopCompare.IsEnabled = false; };
+            runBtnRow.Children.Add(_btnStopCompare);
+            leftPanel.Children.Add(runBtnRow);
+
+            _compareProgressBar = new ProgressBar
+            {
+                Height = 6,
+                Margin = new Thickness(0, 0, 0, 6),
+                Visibility = Visibility.Collapsed
+            };
+            leftPanel.Children.Add(_compareProgressBar);
+
+            _lblCompareStatus = new TextBlock
+            {
+                Text = "Готов к запуску. Выберите алгоритмы и нажмите 'Запустить сравнение'.",
+                FontSize = 11,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#334155")),
+                TextWrapping = TextWrapping.Wrap,
+                FontWeight = FontWeights.Normal
+            };
+            leftPanel.Children.Add(_lblCompareStatus);
+
+            leftScroll.Content = leftPanel;
+            controlBox.Content = leftScroll;
+            Grid.SetColumn(controlBox, 0);
+            mainGrid.Children.Add(controlBox);
+
+            // Правая панель: График
+            Grid chartArea = new Grid();
+            chartArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            chartArea.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            Border navBorder = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F1F5F9")),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#CBD5E1")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            DockPanel navDock = new DockPanel { LastChildFill = false };
+            TextBlock lblHint = new TextBlock
+            {
+                Text = "🖐️ Колесико / Щипок: мягкий зум | Перетаскивание: сдвиг по оси N",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(lblHint, Dock.Left);
+            navDock.Children.Add(lblHint);
+
+            Button btnResetCompareZoom = new Button
+            {
+                Content = " ↺ Сбросить масштаб ",
+                Height = 28,
+                Padding = new Thickness(12, 0, 12, 0),
+                FontWeight = FontWeights.Bold,
+                FontSize = 12,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#10B981")),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            btnResetCompareZoom.Click += (s, e) =>
+            {
+                _compareXAxis.MinLimit = null;
+                _compareXAxis.MaxLimit = null;
+                UpdateCompareStatusLabel();
+            };
+            DockPanel.SetDock(btnResetCompareZoom, Dock.Right);
+            navDock.Children.Add(btnResetCompareZoom);
+
+            navBorder.Child = navDock;
+            Grid.SetRow(navBorder, 0);
+            chartArea.Children.Add(navBorder);
+
+            _compareXAxis = new Axis { Name = "Размер N" };
+            _compareYAxis = new Axis { Name = "Время (мс)" };
+
+            _compareChart = new CartesianChart
+            {
+                IsHitTestVisible = true,
+                ZoomMode = LiveChartsCore.Measure.ZoomAndPanMode.X,
+                LegendPosition = LiveChartsCore.Measure.LegendPosition.Right,
+                Series = new ObservableCollection<ISeries>(),
+                XAxes = new Axis[] { _compareXAxis },
+                YAxes = new Axis[] { _compareYAxis }
+            };
+
+            _compareChart.PreviewMouseWheel += CompareChart_PreviewMouseWheel;
+
+            _compareChart.PreviewMouseDown += (s, e) =>
+            {
+                if (e.LeftButton == MouseButtonState.Pressed || e.RightButton == MouseButtonState.Pressed)
+                {
+                    _compareDragStartPoint = e.GetPosition(_compareChart);
+                    _compareDragStartMin = _compareXAxis.MinLimit ?? _compareDataMinN;
+                    _compareDragStartMax = _compareXAxis.MaxLimit ?? _compareDataMaxN;
+                    _compareChart.CaptureMouse();
+                }
+            };
+
+            _compareChart.PreviewMouseMove += (s, e) =>
+            {
+                if (_compareDragStartPoint.HasValue && (e.LeftButton == MouseButtonState.Pressed || e.RightButton == MouseButtonState.Pressed))
+                {
+                    Point currentPoint = e.GetPosition(_compareChart);
+                    double deltaX = currentPoint.X - _compareDragStartPoint.Value.X;
+                    double chartWidth = _compareChart.ActualWidth > 0 ? _compareChart.ActualWidth : 700;
+
+                    double viewWidth = _compareDragStartMax - _compareDragStartMin;
+                    double totalRange = Math.Max(1.0, _compareDataMaxN - _compareDataMinN);
+                    if (viewWidth >= totalRange)
+                    {
+                        viewWidth = totalRange * 0.8;
+                        _compareDragStartMax = _compareDragStartMin + viewWidth;
+                    }
+
+                    double shiftN = -(deltaX / chartWidth) * viewWidth;
+                    double newMin = _compareDragStartMin + shiftN;
+                    double newMax = _compareDragStartMax + shiftN;
+
+                    if (newMin < _compareDataMinN)
+                    {
+                        newMin = _compareDataMinN;
+                        newMax = newMin + viewWidth;
+                    }
+                    if (newMax > _compareDataMaxN)
+                    {
+                        newMax = _compareDataMaxN;
+                        newMin = Math.Max(_compareDataMinN, newMax - viewWidth);
+                    }
+
+                    _compareXAxis.MinLimit = newMin;
+                    _compareXAxis.MaxLimit = newMax;
+                    UpdateCompareStatusLabel();
+                }
+            };
+
+            _compareChart.PreviewMouseUp += (s, e) =>
+            {
+                if (_compareDragStartPoint.HasValue)
+                {
+                    _compareDragStartPoint = null;
+                    _compareChart.ReleaseMouseCapture();
+                }
+            };
+
+            Grid.SetRow(_compareChart, 1);
+            chartArea.Children.Add(_compareChart);
+
+            Grid.SetColumn(chartArea, 1);
+            mainGrid.Children.Add(chartArea);
+
+            return mainGrid;
+        }
+
+        private Point _dragItemStartPoint;
+
+        private void CompareAvailable_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            _dragItemStartPoint = e.GetPosition(null);
+        }
+
+        private void CompareAvailable_PreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                Point currentPoint = e.GetPosition(null);
+                Vector diff = _dragItemStartPoint - currentPoint;
+                if (Math.Abs(diff.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                    Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance)
+                {
+                    if (_compareAvailableListBox.SelectedItem is string selectedAlgo)
+                    {
+                        DragDrop.DoDragDrop(_compareAvailableListBox, selectedAlgo, DragDropEffects.Copy);
+                    }
+                }
+            }
+        }
+
+        private void CompareSelected_Drop(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetData(DataFormats.StringFormat) is string item)
+            {
+                if (!_compareSelectedListBox.Items.Contains(item))
+                {
+                    _compareSelectedListBox.Items.Add(item);
+                }
+            }
+        }
+
+        private void AddSelectedToCompare()
+        {
+            if (_compareAvailableListBox.SelectedItem is string item)
+            {
+                if (!_compareSelectedListBox.Items.Contains(item))
+                {
+                    _compareSelectedListBox.Items.Add(item);
+                }
+            }
+        }
+
+        private void RemoveSelectedFromCompare()
+        {
+            if (_compareSelectedListBox.SelectedItem is string item)
+            {
+                _compareSelectedListBox.Items.Remove(item);
+            }
+        }
+
+        private int GetAlgorithmIndexByName(string name)
+        {
+            if (name.Contains("Постоянная")) return 0;
+            if (name.Contains("Сумма")) return 1;
+            if (name.Contains("Произведение")) return 2;
+            if (name.Contains("Прямое вычисление")) return 3;
+            if (name.Contains("Горнера")) return 4;
+            if (name.Contains("Bubble")) return 5;
+            if (name.Contains("Quick")) return 6;
+            if (name.Contains("TimSort")) return 7;
+            if (name.Contains("Duplicates")) return 9;
+            if (name.Contains("ReverseArray") || name.Contains("Разворот")) return 10;
+            if (name.Contains("Shell")) return 11;
+            if (name.Contains("итеративный")) return 12;
+            if (name.Contains("Рекурсивный")) return 13;
+            if (name.Contains("бинарный") || name.Contains("Быстрый")) return 14;
+            return 0;
+        }
+
+        private string CleanAlgoShortName(string name)
+        {
+            if (name.Contains("Постоянная")) return "Постоянная O(1)";
+            if (name.Contains("Сумма")) return "Сумма O(N)";
+            if (name.Contains("Произведение")) return "Произведение O(N)";
+            if (name.Contains("Прямое вычисление")) return "Полином наивный O(N²)";
+            if (name.Contains("Горнера")) return "Схема Горнера O(N)";
+            if (name.Contains("Bubble")) return "Bubble Sort O(N²)";
+            if (name.Contains("Quick")) return "Quick Sort O(N log N)";
+            if (name.Contains("TimSort")) return "TimSort O(N log N)";
+            if (name.Contains("Duplicates")) return "HasDuplicates O(N)";
+            if (name.Contains("ReverseArray") || name.Contains("Разворот")) return "Разворот O(N)";
+            if (name.Contains("Shell")) return "ShellSort O(N^1.25)";
+            if (name.Contains("итеративный")) return "Pow Итеративный O(N)";
+            if (name.Contains("Рекурсивный")) return "Pow Рекурсивный O(N)";
+            if (name.Contains("бинарный") || name.Contains("Быстрый")) return "Pow Бинарный O(log N)";
+            return name;
+        }
+
+        private async void BtnRunComparison_Click(object sender, RoutedEventArgs e)
+        {
+            if (!int.TryParse(_txtCompareStartN.Text, out int startN) ||
+                !int.TryParse(_txtCompareEndN.Text, out int endN) ||
+                !int.TryParse(_txtCompareStep.Text, out int step) || step <= 0 || startN < 0 || endN < startN)
+            {
+                MessageBox.Show("Заполните корректно параметры диапазона для сравнения.");
+                return;
+            }
+
+            if (!int.TryParse(_txtCompareRuns.Text, out int runsCount) || runsCount <= 0)
+            {
+                runsCount = 3;
+            }
+
+            var selectedAlgorithms = _compareSelectedListBox.Items.OfType<string>().ToList();
+            if (selectedAlgorithms.Count == 0)
+            {
+                MessageBox.Show("Добавьте хотя бы один алгоритм в список сравнения.", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _compareCts = new CancellationTokenSource();
+            var token = _compareCts.Token;
+
+            _btnRunCompare.IsEnabled = false;
+            _btnStopCompare.IsEnabled = true;
+            _compareProgressBar.Visibility = Visibility.Visible;
+            _compareProgressBar.IsIndeterminate = true;
+
+            var seriesCollection = new ObservableCollection<ISeries>();
+            _compareChart.Series = seriesCollection;
+            _compareDataMinN = startN;
+            _compareDataMaxN = endN;
+            _compareXAxis.MinLimit = null;
+            _compareXAxis.MaxLimit = null;
+
+            SKColor[] palette = new[]
+            {
+                SKColors.DodgerBlue,
+                SKColors.Crimson,
+                SKColors.ForestGreen,
+                SKColors.DarkOrange,
+                SKColors.Purple,
+                SKColors.Teal,
+                SKColors.DeepPink,
+                SKColors.Brown,
+                SKColors.DarkSlateBlue,
+                SKColors.Goldenrod
+            };
+
+            try
+            {
+                for (int i = 0; i < selectedAlgorithms.Count; i++)
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    string algoName = selectedAlgorithms[i];
+                    int algoIndex = GetAlgorithmIndexByName(algoName);
+                    string displayName = CleanAlgoShortName(algoName);
+
+                    _lblCompareStatus.Text = $"⏳ Выполняется ({i + 1}/{selectedAlgorithms.Count}): {displayName}...";
+
+                    var points = await Task.Run(() =>
+                    {
+                        int[] maxDataInt = new int[endN];
+                        Random rng = new Random();
+                        for (int k = 0; k < endN; k++) maxDataInt[k] = rng.Next(1, Math.Max(10000, endN * 5));
+
+                        Thread.CurrentThread.Priority = ThreadPriority.Highest;
+
+                        int warmupSize = Math.Min(200, endN);
+                        int[] warmupInt = maxDataInt.AsSpan(0, warmupSize).ToArray();
+                        double[] warmupDouble = warmupInt.Select(x => (double)x).ToArray();
+                        for (int w = 0; w < 3; w++)
+                        {
+                            if (token.IsCancellationRequested) break;
+                            ExecuteAlgorithm(algoIndex, warmupInt, warmupDouble, warmupSize);
+                        }
+
+                        List<ObservablePoint> algoPoints = new List<ObservablePoint>();
+
+                        for (int n = startN; n <= endN; n += step)
+                        {
+                            if (token.IsCancellationRequested) return null;
+
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+
+                            int[] curInt = new int[n];
+                            double[] curDouble = new double[n];
+                            double bestMs = double.MaxValue;
+
+                            for (int r = 0; r < runsCount; r++)
+                            {
+                                Array.Copy(maxDataInt, curInt, n);
+                                for (int idx = 0; idx < n; idx++) curDouble[idx] = curInt[idx];
+
+                                long sTicks = Stopwatch.GetTimestamp();
+                                ExecuteAlgorithm(algoIndex, curInt, curDouble, n);
+                                long eTicks = Stopwatch.GetTimestamp();
+
+                                double ms = (eTicks - sTicks) * 1000.0 / Stopwatch.Frequency;
+                                if (ms < bestMs) bestMs = ms;
+                            }
+
+                            algoPoints.Add(new ObservablePoint(n, bestMs));
+                        }
+
+                        Thread.CurrentThread.Priority = ThreadPriority.Normal;
+                        return algoPoints;
+                    }, token);
+
+                    if (token.IsCancellationRequested || points == null) break;
+
+                    SKColor color = palette[i % palette.Length];
+                    var seriesValues = new ObservableCollection<ObservablePoint>(points);
+
+                    var lineSeries = new LineSeries<ObservablePoint>
+                    {
+                        Values = seriesValues,
+                        Name = displayName,
+                        Stroke = new SolidColorPaint(color) { StrokeThickness = 2.5f },
+                        GeometryStroke = new SolidColorPaint(color) { StrokeThickness = 2f },
+                        GeometryFill = new SolidColorPaint(SKColors.White),
+                        GeometrySize = 5,
+                        Fill = null,
+                        EnableNullSplitting = false
+                    };
+
+                    seriesCollection.Add(lineSeries);
+                }
+
+                if (token.IsCancellationRequested)
+                {
+                    _lblCompareStatus.Text = "Сравнение прервано пользователем.";
+                }
+                else
+                {
+                    _lblCompareStatus.Text = $"✅ Сравнение успешно завершено! Построено графиков: {selectedAlgorithms.Count}.";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _lblCompareStatus.Text = "Сравнение отменено.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сравнения: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                _lblCompareStatus.Text = $"Ошибка: {ex.Message}";
+            }
+            finally
+            {
+                _btnRunCompare.IsEnabled = true;
+                _btnStopCompare.IsEnabled = false;
+                _compareProgressBar.Visibility = Visibility.Collapsed;
+                _compareCts?.Dispose();
+                _compareCts = null;
+            }
+        }
+
         private async void RefreshDatabaseGrid()
         {
             if (_dbDataGrid == null || _lblDbStats == null) return;
@@ -720,7 +1364,7 @@ namespace Laba_1
             }
         }
 
-        private TextBox AddInputField(string label, string defaultValue, StackPanel container)
+        private TextBox AddInputField(string label, string defaultValue, Panel container)
         {
             StackPanel fieldGroup = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
             fieldGroup.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 4) });
@@ -734,7 +1378,10 @@ namespace Laba_1
 
         private void CbAlgorithms_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            bool isMatrix3D = IsMatrixAlgorithm(_cbAlgorithms.SelectedIndex);
+            int index = _cbAlgorithms.SelectedIndex;
+            bool isMatrix3D = IsMatrixAlgorithm(index);
+
+            ApplyDefaultAlgorithmParameters(index);
 
             if (_container2D != null) _container2D.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
             if (_canvas3D.Parent is Grid container3D)
@@ -744,6 +1391,90 @@ namespace Laba_1
         }
 
         private bool IsMatrixAlgorithm(int index) => index == 8;
+
+        private void ApplyDefaultAlgorithmParameters(int index)
+        {
+            if (_txtStartN == null || _txtEndN == null || _txtStep == null || _txtRuns == null) return;
+
+            switch (index)
+            {
+                case 0: // 1. Постоянная функция (тяжелые вычисления для стабилизации на ~10 мс)
+                    _txtStartN.Text = "10";
+                    _txtEndN.Text = "1000";
+                    _txtStep.Text = "50";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 1: // 2. Сумма элементов O(N)
+                case 2: // 3. Произведение элементов O(N)
+                case 4: // 5. Полином по схеме Горнера O(N)
+                case 10: // 11. Разворот массива O(N)
+                    _txtStartN.Text = "10000";
+                    _txtEndN.Text = "500000";
+                    _txtStep.Text = "20000";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 3: // 4. Прямое вычисление полинома O(N^2)
+                case 5: // 6. Bubble Sort O(N^2)
+                    _txtStartN.Text = "200";
+                    _txtEndN.Text = "3000";
+                    _txtStep.Text = "100";
+                    _txtRuns.Text = "3";
+                    break;
+
+                case 6: // 7. Quick Sort O(N log N)
+                case 7: // 8. TimSort O(N log N)
+                case 11: // 12. ShellSort O(N^1.25)
+                    _txtStartN.Text = "1000";
+                    _txtEndN.Text = "25000";
+                    _txtStep.Text = "1000";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 8: // 9. Матрицы 3D O(N^3)
+                    _txtStartN.Text = "10";
+                    _txtEndN.Text = "100";
+                    _txtStep.Text = "10";
+                    _txtRuns.Text = "1";
+                    break;
+
+                case 9: // 10. HasDuplicates O(N)
+                    _txtStartN.Text = "1000";
+                    _txtEndN.Text = "50000";
+                    _txtStep.Text = "2500";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 12: // 13. Простой итеративный алгоритм PowIterative O(N)
+                    _txtStartN.Text = "5000";
+                    _txtEndN.Text = "200000";
+                    _txtStep.Text = "10000";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 13: // 14. Рекурсивный алгоритм PowRecursive O(N) (безопасный диапазон без переполнения стека)
+                    _txtStartN.Text = "100";
+                    _txtEndN.Text = "3000";
+                    _txtStep.Text = "100";
+                    _txtRuns.Text = "5";
+                    break;
+
+                case 14: // 15. Быстрый (бинарный) алгоритм PowBinary O(log N)
+                    _txtStartN.Text = "10000";
+                    _txtEndN.Text = "1000000";
+                    _txtStep.Text = "50000";
+                    _txtRuns.Text = "5";
+                    break;
+
+                default:
+                    _txtStartN.Text = "100";
+                    _txtEndN.Text = "2000";
+                    _txtStep.Text = "100";
+                    _txtRuns.Text = "5";
+                    break;
+            }
+        }
 
         private async void BtnStart_Click(object sender, RoutedEventArgs e)
         {
@@ -891,7 +1622,7 @@ namespace Laba_1
             {
                 int[] maxDataInt = new int[endN];
                 Random rng = new Random();
-                for (int i = 0; i < endN; i++) maxDataInt[i] = rng.Next(0, 100);
+                for (int i = 0; i < endN; i++) maxDataInt[i] = rng.Next(1, Math.Max(10000, endN * 5));
 
                 Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
@@ -908,9 +1639,6 @@ namespace Laba_1
 
                 List<ObservablePoint> results = new List<ObservablePoint>();
 
-                int[] intData = new int[endN];
-                double[] doubleData = new double[endN];
-
                 for (int n = startN; n <= endN; n += step)
                 {
                     if (token.IsCancellationRequested) return;
@@ -919,17 +1647,20 @@ namespace Laba_1
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
 
+                    // Массив строго размера n, чтобы алгоритмы (QuickSort, BubbleSort, Sum и др.) обрабатывали ровно n элементов!
+                    int[] currentIntData = new int[n];
+                    double[] currentDoubleData = new double[n];
+
                     int runs = runsCount;
                     double bestRunMs = double.MaxValue;
 
                     for (int r = 0; r < runs; r++)
                     {
-                        Array.Copy(maxDataInt, intData, n);
-
-                        for (int i = 0; i < n; i++) doubleData[i] = intData[i];
+                        Array.Copy(maxDataInt, currentIntData, n);
+                        for (int i = 0; i < n; i++) currentDoubleData[i] = currentIntData[i];
 
                         long startTicks = Stopwatch.GetTimestamp();
-                        long steps = ExecuteAlgorithm(algorithmIndex, intData, doubleData, n);
+                        long steps = ExecuteAlgorithm(algorithmIndex, currentIntData, currentDoubleData, n);
                         long endTicks = Stopwatch.GetTimestamp();
 
                         long elapsedTicks = endTicks - startTicks;
@@ -1010,20 +1741,23 @@ namespace Laba_1
             if (algorithmName.Contains("Постоянная"))
                 return (n => 1.0, "O(1)");
 
-            if (algorithmName.Contains("Bubble") || algorithmName.Contains("HasDuplicates") || algorithmName.Contains("Прямое вычисление"))
+            if (algorithmName.Contains("Bubble") || algorithmName.Contains("Прямое вычисление"))
                 return (n => n * n, "O(N²)");
 
-            if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort") || algorithmName.Contains("Shell"))
-                return (n => n * Math.Log2(Math.Max(n, 1)), "O(N log N)");
+            if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort"))
+                return (n => n * Math.Log2(Math.Max(n, 2)), "O(N log N)");
+
+            if (algorithmName.Contains("Shell"))
+                return (n => Math.Pow(n, 1.25), "O(N^1.25)");
 
             if (algorithmName.Contains("быстрый") || algorithmName.Contains("бинарный") || algorithmName.Contains("PowBinary"))
-                return (n => Math.Log2(Math.Max(n, 1)), "O(log N)");
+                return (n => Math.Log2(Math.Max(n, 2)), "O(log N)");
 
-            // По умолчанию O(N): Сумма, Произведение, Горнер, Разворот, Простой/Рекурсивный Pow и др.
+            // По умолчанию O(N): Сумма, Произведение, Горнер, Разворот, Простой/Рекурсивный Pow, HasDuplicates
             return (n => n, "O(N)");
         }
 
-        // Построение теоретической линии поверх практических результатов
+        // Построение теоретической линии методом наименьших квадратов (МНК) поверх практических результатов
         private void CalculateTheoreticalCurve(string algorithmName, IEnumerable<ObservablePoint> actualPoints)
         {
             _theoreticalValues.Clear();
@@ -1032,22 +1766,32 @@ namespace Laba_1
 
             var (complexityFunc, label) = GetComplexityInfo(algorithmName);
 
-            // Берём последнюю точку (максимальный N) для приведения к реальному масштабу времени (мс)
-            var maxPoint = pointsList.OrderBy(p => p.X.Value).LastOrDefault();
-            if (maxPoint == null) return;
-
-            double maxN = maxPoint.X.Value;
-            double maxY = maxPoint.Y.Value;
-            double theoreticalMax = complexityFunc(maxN);
-
-            if (theoreticalMax <= 0) theoreticalMax = 1;
-
-            // Коэффициент масштабирования k = Y_реальное / Y_теоретическое
-            double k = maxY / theoreticalMax;
-
-            foreach (var point in pointsList.OrderBy(p => p.X.Value))
+            // Метод наименьших квадратов (МНК): k = sum(y_i * f_i) / sum(f_i^2)
+            double sumYF = 0;
+            double sumF2 = 0;
+            foreach (var point in pointsList)
             {
-                double n = point.X.Value;
+                double n = point.X!.Value;
+                double y = point.Y!.Value;
+                double f = complexityFunc(n);
+                sumYF += y * f;
+                sumF2 += f * f;
+            }
+
+            double k = sumF2 > 0 ? (sumYF / sumF2) : 0;
+            if (k <= 0)
+            {
+                var maxPoint = pointsList.OrderBy(p => p.X!.Value).LastOrDefault();
+                if (maxPoint != null && maxPoint.X.HasValue && maxPoint.Y.HasValue)
+                {
+                    double fMax = complexityFunc(maxPoint.X.Value);
+                    k = fMax > 0 ? (maxPoint.Y.Value / fMax) : 0.001;
+                }
+            }
+
+            foreach (var point in pointsList.OrderBy(p => p.X!.Value))
+            {
+                double n = point.X!.Value;
                 double idealTime = k * complexityFunc(n);
                 _theoreticalValues.Add(new ObservablePoint(n, idealTime));
             }
@@ -1055,95 +1799,119 @@ namespace Laba_1
             // Обновляем название теоретической серии
             if (_chart2D.Series.ElementAtOrDefault(1) is LineSeries<ObservablePoint> idealSeries)
             {
-                idealSeries.Name = $"Идеальный {label}";
+                idealSeries.Name = $"Теория {label}";
             }
         }
 
-        // --- Методы навигации, масштабирования и прокрутки 2D графика ---
+        // --- Методы навигации, масштабирования и прокрутки 2D графика тачпадом и мышью ---
 
-        private Button CreateNavButton(string text, string hexColor)
+        // Обработка жеста горизонтальной прокрутки тачпада (двупальцевый горизонтальный свайп / WM_MOUSEHWHEEL)
+        private void OnTouchpadHorizontalScroll(short delta)
         {
-            return new Button
+            if (_compareChart != null && _compareChart.IsVisible)
             {
-                Content = text,
-                Height = 26,
-                Margin = new Thickness(3, 0, 0, 0),
-                Padding = new Thickness(8, 0, 8, 0),
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 11,
-                Foreground = Brushes.White,
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor)),
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
-            };
+                ScrollChartAxis(_compareChart, _compareXAxis, _compareDataMinN, _compareDataMaxN, delta, UpdateCompareStatusLabel);
+            }
+            else if (_chart2D != null && _chart2D.IsVisible)
+            {
+                ScrollChartAxis(_chart2D, _xAxis, _dataMinN, _dataMaxN, delta, UpdateScrollBarAndLabel);
+            }
         }
 
-        // Быстрый пропуск первых 25% (убирает стартовый системный шум)
-        private void SkipFirst25Percent()
+        private void ScrollChartAxis(CartesianChart chart, Axis xAxis, double dataMin, double dataMax, short delta, Action updateCallback)
         {
-            double range = _dataMaxN - _dataMinN;
-            if (range <= 0) return;
-
-            double newMin = _dataMinN + range * 0.25;
-            _xAxis.MinLimit = newMin;
-            _xAxis.MaxLimit = _dataMaxN;
-            UpdateScrollBarAndLabel();
-        }
-
-        // Прокрутка влево / вправо по оси X
-        private void PanChart(double fraction)
-        {
-            double curMin = _xAxis.MinLimit ?? _dataMinN;
-            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
+            if (xAxis == null) return;
+            double curMin = xAxis.MinLimit ?? dataMin;
+            double curMax = xAxis.MaxLimit ?? dataMax;
+            double totalRange = Math.Max(1.0, dataMax - dataMin);
             double viewWidth = curMax - curMin;
-            double totalRange = _dataMaxN - _dataMinN;
-            if (viewWidth >= totalRange && fraction < 0) return;
 
-            double shift = viewWidth * fraction;
-            double newMin = curMin + shift;
-            double newMax = curMax + shift;
-
-            if (newMin < _dataMinN)
+            if (viewWidth >= totalRange)
             {
-                newMin = _dataMinN;
+                viewWidth = totalRange * 0.75;
+                curMin = dataMin;
+                curMax = curMin + viewWidth;
+            }
+
+            double step = (viewWidth * 0.05) * (delta / 120.0);
+            double newMin = curMin + step;
+            double newMax = curMax + step;
+
+            if (newMin < dataMin)
+            {
+                newMin = dataMin;
                 newMax = newMin + viewWidth;
             }
-            if (newMax > _dataMaxN)
+            if (newMax > dataMax)
             {
-                newMax = _dataMaxN;
-                newMin = newMax - viewWidth;
+                newMax = dataMax;
+                newMin = Math.Max(dataMin, newMax - viewWidth);
             }
 
-            _xAxis.MinLimit = newMin;
-            _xAxis.MaxLimit = newMax;
-            UpdateScrollBarAndLabel();
+            xAxis.MinLimit = newMin;
+            xAxis.MaxLimit = newMax;
+            updateCallback?.Invoke();
         }
 
-        // Приближение / отдаление по оси X
-        private void ZoomChart(double factor)
+        // Мягкий зум колесом мыши / жестом pinch тачпада (чувствительность снижена в 2.5-3 раза)
+        private void Chart_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            double curMin = _xAxis.MinLimit ?? _dataMinN;
-            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
-            double center = (curMin + curMax) / 2.0;
-            double newHalfWidth = ((curMax - curMin) * factor) / 2.0;
+            HandleChartMouseWheel(_chart2D, _xAxis, _dataMinN, _dataMaxN, e, UpdateScrollBarAndLabel);
+        }
 
-            double newMin = center - newHalfWidth;
-            double newMax = center + newHalfWidth;
+        private void CompareChart_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            HandleChartMouseWheel(_compareChart, _compareXAxis, _compareDataMinN, _compareDataMaxN, e, UpdateCompareStatusLabel);
+        }
 
-            if (factor > 1.0 && (newMin <= _dataMinN && newMax >= _dataMaxN))
+        private void HandleChartMouseWheel(CartesianChart chart, Axis xAxis, double dataMin, double dataMax, MouseWheelEventArgs e, Action updateCallback)
+        {
+            e.Handled = true;
+            if (chart == null || xAxis == null) return;
+
+            double curMin = xAxis.MinLimit ?? dataMin;
+            double curMax = xAxis.MaxLimit ?? dataMax;
+            double totalRange = Math.Max(1.0, dataMax - dataMin);
+            double curWidth = curMax - curMin;
+
+            if (curWidth <= 0) return;
+
+            // Сниженная чувствительность: ~8% за один щелчок колеса вместо резких 30-40%
+            double factor = e.Delta > 0 ? 0.92 : 1.087;
+            double newWidth = curWidth * factor;
+
+            if (newWidth < 5) newWidth = 5;
+            if (newWidth >= totalRange)
             {
-                ResetChartZoom();
+                xAxis.MinLimit = null;
+                xAxis.MaxLimit = null;
+                updateCallback?.Invoke();
                 return;
             }
 
-            newMin = Math.Max(_dataMinN, newMin);
-            newMax = Math.Min(_dataMaxN, newMax);
+            // Масштабирование относительно текущего положения курсора мыши
+            Point mousePos = e.GetPosition(chart);
+            double chartWidth = chart.ActualWidth > 0 ? chart.ActualWidth : 700;
+            double ratio = Math.Max(0.0, Math.Min(1.0, mousePos.X / chartWidth));
 
-            if (newMax - newMin < 2) return; // Защита от чрезмерного приближения
+            double center = curMin + curWidth * ratio;
+            double newMin = center - newWidth * ratio;
+            double newMax = center + newWidth * (1.0 - ratio);
 
-            _xAxis.MinLimit = newMin;
-            _xAxis.MaxLimit = newMax;
-            UpdateScrollBarAndLabel();
+            if (newMin < dataMin)
+            {
+                newMin = dataMin;
+                newMax = newMin + newWidth;
+            }
+            if (newMax > dataMax)
+            {
+                newMax = dataMax;
+                newMin = Math.Max(dataMin, newMax - newWidth);
+            }
+
+            xAxis.MinLimit = newMin;
+            xAxis.MaxLimit = newMax;
+            updateCallback?.Invoke();
         }
 
         // Сброс масштаба на полный обзор всего графика (100%)
@@ -1214,6 +1982,25 @@ namespace Laba_1
                     _chartScrollBar.Value = 0;
                     _chartScrollBar.IsEnabled = false;
                 }
+            }
+        }
+
+        private void UpdateCompareStatusLabel()
+        {
+            if (_lblCompareStatus == null || _compareXAxis == null) return;
+            double curMin = _compareXAxis.MinLimit ?? _compareDataMinN;
+            double curMax = _compareXAxis.MaxLimit ?? _compareDataMaxN;
+            double totalRange = Math.Max(1.0, _compareDataMaxN - _compareDataMinN);
+            double viewWidth = curMax - curMin;
+
+            if (_compareXAxis.MinLimit == null && _compareXAxis.MaxLimit == null)
+            {
+                _lblCompareStatus.Text = $"🔍 Полный диапазон: N от {_compareDataMinN:F0} до {_compareDataMaxN:F0} (100%)";
+            }
+            else
+            {
+                double pct = Math.Min(100.0, (viewWidth / totalRange) * 100.0);
+                _lblCompareStatus.Text = $"🔍 Просмотр: N от {curMin:F0} до {curMax:F0} ({pct:F0}% диапазона)";
             }
         }
 
