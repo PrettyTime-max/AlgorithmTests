@@ -27,6 +27,7 @@ namespace Laba_1
         private TextBox _txtStartN;
         private TextBox _txtEndN;
         private TextBox _txtStep;
+        private TextBox _txtRuns;
         private Button _btnStart;
         private Button _btnStop;
 
@@ -227,6 +228,7 @@ namespace Laba_1
             _txtStartN = AddInputField("Старт (N):", "1", controlsPanel);
             _txtEndN = AddInputField("Конец (N):", "100", controlsPanel);
             _txtStep = AddInputField("Шаг (Step):", "10", controlsPanel);
+            _txtRuns = AddInputField("Прогоны:", "10", controlsPanel);
 
             _btnStart = new Button
             {
@@ -265,7 +267,7 @@ namespace Laba_1
 
             _cbHistory = new ComboBox
             {
-                Width = 320,
+                Width = 260,
                 Height = 30,
                 VerticalContentAlignment = VerticalAlignment.Center
             };
@@ -677,10 +679,11 @@ namespace Laba_1
                 }
                 else
                 {
+                    // Группируем замеры по N и берем лучший замер (Best of N) для точек графика
                     var aggregatedPoints = records
                         .GroupBy(r => r.N)
                         .OrderBy(g => g.Key)
-                        .Select(g => new ObservablePoint(g.Key, g.Average(r => r.ExecutionTimeMs)))
+                        .Select(g => new ObservablePoint(g.Key, g.Min(r => r.ExecutionTimeMs)))
                         .ToList();
 
                     foreach (var pt in aggregatedPoints)
@@ -835,7 +838,11 @@ namespace Laba_1
                 return;
             }
 
-            // 5. Выполнение нового замера (если замера в БД не было или нажат "Нет")
+            if (!int.TryParse(_txtRuns.Text, out int runsCount) || runsCount <= 0)
+            {
+                runsCount = 5;
+            }
+
             _cts = new CancellationTokenSource();
             _btnStart.IsEnabled = false;
             _btnStop.IsEnabled = true;
@@ -852,7 +859,7 @@ namespace Laba_1
                 }
                 else
                 {
-                    dbResults = await RunArray2DBenchmarkAsync(selectedIndex, startN, endN, step, true, _cts.Token);
+                    dbResults = await RunArray2DBenchmarkAsync(selectedIndex, startN, endN, step, runsCount, _cts.Token);
                 }
 
                 if (_cts != null && !_cts.IsCancellationRequested && dbResults != null && dbResults.Count > 0)
@@ -953,7 +960,7 @@ namespace Laba_1
             return dbResults;
         }
 
-        private async Task<List<BenchmarkResult>> RunArray2DBenchmarkAsync(int algorithmIndex, int startN, int endN, int step, bool bypassCache, CancellationToken token)
+        private async Task<List<BenchmarkResult>> RunArray2DBenchmarkAsync(int algorithmIndex, int startN, int endN, int step, int runsCount, CancellationToken token)
         {
             _chartValues.Clear();
             _theoreticalValues.Clear();
@@ -971,20 +978,18 @@ namespace Laba_1
 
                 Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
-                int warmupSize = Math.Min(1000, endN);
+                // Прогрев JIT-компилятора и кэша процессора
+                int warmupSize = Math.Min(300, endN);
                 int[] warmupInt = maxDataInt.AsSpan(0, warmupSize).ToArray();
                 double[] warmupDouble = warmupInt.Select(x => (double)x).ToArray();
 
-                for (int i = 0; i < 10; i++)
+                for (int i = 0; i < 5; i++)
                 {
                     if (token.IsCancellationRequested) break;
                     ExecuteAlgorithm(algorithmIndex, warmupInt, warmupDouble, warmupSize);
                 }
 
                 List<ObservablePoint> results = new List<ObservablePoint>();
-
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
 
                 int[] intData = new int[endN];
                 double[] doubleData = new double[endN];
@@ -993,26 +998,12 @@ namespace Laba_1
                 {
                     if (token.IsCancellationRequested) return;
 
-                    if (!bypassCache)
-                    {
-                        var cachedRecords = await AppDbContext.GetCachedResultsAsync(algName, n);
-                        if (cachedRecords.Count > 0)
-                        {
-                            if (isStepBased)
-                            {
-                                results.Add(new ObservablePoint(n, cachedRecords.First().StepCount ?? 0));
-                            }
-                            else
-                            {
-                                results.Add(new ObservablePoint(n, cachedRecords.Average(r => r.ExecutionTimeMs)));
-                            }
-                            continue;
-                        }
-                    }
+                    // Очистка сборщика мусора перед точкой замера для устранения случайных пауз GC
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
 
-                    const int runs = 5;
-                    long totalTicks = 0;
-                    long lastSteps = 0;
+                    int runs = runsCount;
+                    double bestRunMs = double.MaxValue;
 
                     for (int r = 0; r < runs; r++)
                     {
@@ -1025,9 +1016,12 @@ namespace Laba_1
 
                         lastSteps = steps;
                         long elapsedTicks = endTicks - startTicks;
-                        totalTicks += elapsedTicks;
-
                         double singleRunMs = (elapsedTicks * 1000.0) / Stopwatch.Frequency;
+
+                        if (singleRunMs < bestRunMs)
+                        {
+                            bestRunMs = singleRunMs;
+                        }
 
                         newDbResults.Add(new BenchmarkResult
                         {
@@ -1040,15 +1034,8 @@ namespace Laba_1
                         });
                     }
 
-                    if (isStepBased)
-                    {
-                        results.Add(new ObservablePoint(n, lastSteps));
-                    }
-                    else
-                    {
-                        double avgMs = ((double)totalTicks / runs * 1000.0) / Stopwatch.Frequency;
-                        results.Add(new ObservablePoint(n, avgMs));
-                    }
+                    // Best of N: берем минимальное чистое время без помех планировщика ОС
+                    results.Add(new ObservablePoint(n, bestRunMs));
                 }
 
                 Thread.CurrentThread.Priority = ThreadPriority.Normal;
@@ -1076,7 +1063,7 @@ namespace Laba_1
             switch (algorithmIndex)
             {
                 // Часть I.
-                case 0: Algorithms.Constant(intData); return n;
+                case 0: Algorithms.Constant(intData); return 1;
                 case 1: Algorithms.Sum(intData); return n;
                 case 2: Algorithms.Product(intData); return n;
                 case 3: Algorithms.PolyNaive(doubleData, 1.5); return n;
