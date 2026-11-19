@@ -19,6 +19,7 @@ using System.Windows.Shapes;
 using LiveChartsCore.SkiaSharpView.Painting;
 using SkiaSharp;
 using System.Windows.Input;
+using System.Windows.Controls.Primitives;
 
 namespace Laba_1
 {
@@ -50,7 +51,14 @@ namespace Laba_1
         private ComboBox _cbAlgorithms;
 
         // 2D график (с библиотекой LiveChartsCore) 
-        private CartesianChart _chart2D;
+        private Grid _container2D = null!;
+        private CartesianChart _chart2D = null!;
+        private Axis _xAxis = null!;
+        private Axis _yAxis = null!;
+        private ScrollBar _chartScrollBar = null!;
+        private TextBlock _lblZoomRange = null!;
+        private double _dataMinN = 1;
+        private double _dataMaxN = 500;
         private readonly ObservableCollection<ObservablePoint> _chartValues = new();
         private readonly ObservableCollection<ObservablePoint> _theoreticalValues = new(); // Коллекция для теоретических замеров
 
@@ -305,9 +313,74 @@ namespace Laba_1
             TabItem tabCharts = new TabItem { Header = " График " };
             Grid displayGrid = new Grid();
 
+            _container2D = new Grid { Visibility = Visibility.Visible };
+            _container2D.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            _container2D.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            _container2D.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Верхняя панель навигации по оси X (панорамирование, зум, быстрый пропуск старта)
+            Border navBorder = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F1F5F9")),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#CBD5E1")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+
+            DockPanel navDock = new DockPanel { LastChildFill = false };
+
+            _lblZoomRange = new TextBlock
+            {
+                Text = "🔍 Навигация: колесико мыши (зум), зажатие ЛКМ (сдвиг) или кнопки справа 👉",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(_lblZoomRange, Dock.Left);
+            navDock.Children.Add(_lblZoomRange);
+
+            StackPanel navButtons = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(navButtons, Dock.Right);
+
+            Button btnSkipStart = CreateNavButton("⏩ Скрыть старт (первые 25%)", "#6366F1");
+            btnSkipStart.Click += (s, e) => SkipFirst25Percent();
+            navButtons.Children.Add(btnSkipStart);
+
+            Button btnPanLeft = CreateNavButton("◀ Влево", "#64748B");
+            btnPanLeft.Click += (s, e) => PanChart(-0.25);
+            navButtons.Children.Add(btnPanLeft);
+
+            Button btnPanRight = CreateNavButton("Вправо ▶", "#64748B");
+            btnPanRight.Click += (s, e) => PanChart(0.25);
+            navButtons.Children.Add(btnPanRight);
+
+            Button btnZoomIn = CreateNavButton("🔍+ Приблизить", "#0EA5E9");
+            btnZoomIn.Click += (s, e) => ZoomChart(0.7);
+            navButtons.Children.Add(btnZoomIn);
+
+            Button btnZoomOut = CreateNavButton("🔍- Отдалить", "#0EA5E9");
+            btnZoomOut.Click += (s, e) => ZoomChart(1.4);
+            navButtons.Children.Add(btnZoomOut);
+
+            Button btnResetZoom = CreateNavButton("↺ Сбросить", "#10B981");
+            btnResetZoom.Click += (s, e) => ResetChartZoom();
+            navButtons.Children.Add(btnResetZoom);
+
+            navDock.Children.Add(navButtons);
+            navBorder.Child = navDock;
+            Grid.SetRow(navBorder, 0);
+            _container2D.Children.Add(navBorder);
+
+            _xAxis = new Axis { Name = "Размер N" };
+            _yAxis = new Axis { Name = "Время (мс)" };
+
             _chart2D = new CartesianChart
             {
-                IsHitTestVisible = false,
+                IsHitTestVisible = true,
+                ZoomMode = LiveChartsCore.Measure.ZoomAndPanMode.X,
                 TooltipPosition = LiveChartsCore.Measure.TooltipPosition.Hidden,
                 Series = new ISeries[]
                 {
@@ -332,11 +405,36 @@ namespace Laba_1
                         EnableNullSplitting = false
                     }
                 },
-                XAxes = new Axis[] { new Axis { Name = "Размер N" } },
-                YAxes = new Axis[] { new Axis { Name = "Время (мс)" } },
+                XAxes = new Axis[] { _xAxis },
+                YAxes = new Axis[] { _yAxis },
                 Visibility = Visibility.Visible
             };
-            displayGrid.Children.Add(_chart2D);
+
+            // Отслеживание зума колесом мыши для синхронизации скроллбара
+            _chart2D.PreviewMouseWheel += (s, e) =>
+            {
+                Dispatcher.InvokeAsync(UpdateScrollBarAndLabel, System.Windows.Threading.DispatcherPriority.Background);
+            };
+
+            Grid.SetRow(_chart2D, 1);
+            _container2D.Children.Add(_chart2D);
+
+            _chartScrollBar = new ScrollBar
+            {
+                Orientation = Orientation.Horizontal,
+                Height = 16,
+                Margin = new Thickness(45, 4, 15, 0),
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0,
+                ViewportSize = 100,
+                IsEnabled = false
+            };
+            _chartScrollBar.Scroll += ChartScrollBar_Scroll;
+            Grid.SetRow(_chartScrollBar, 2);
+            _container2D.Children.Add(_chartScrollBar);
+
+            displayGrid.Children.Add(_container2D);
 
             Grid container3D = new Grid { Visibility = Visibility.Collapsed };
 
@@ -638,7 +736,7 @@ namespace Laba_1
 
                 // Переключение отображения (2D/3D)
                 bool is3D = selectedSession.AlgorithmName.Contains("3D") || selectedSession.AlgorithmName.Contains("матриц");
-                _chart2D.Visibility = is3D ? Visibility.Collapsed : Visibility.Visible;
+                if (_container2D != null) _container2D.Visibility = is3D ? Visibility.Collapsed : Visibility.Visible;
                 if (_canvas3D.Parent is Grid container3D)
                 {
                     container3D.Visibility = is3D ? Visibility.Visible : Visibility.Collapsed;
@@ -691,6 +789,14 @@ namespace Laba_1
                         _chartValues.Add(pt);
                     }
 
+                    if (aggregatedPoints.Count > 0)
+                    {
+                        _dataMinN = aggregatedPoints.Min(p => p.X ?? 1);
+                        _dataMaxN = aggregatedPoints.Max(p => p.X ?? 500);
+                        ResetChartZoom();
+                    }
+
+                    // Расчет идеального теоретического графика из БД
                     CalculateTheoreticalCurve(selectedSession.AlgorithmName, aggregatedPoints);
                 }
                 else
@@ -747,7 +853,7 @@ namespace Laba_1
         {
             bool isMatrix3D = IsMatrixAlgorithm(_cbAlgorithms.SelectedIndex);
 
-            _chart2D.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
+            if (_container2D != null) _container2D.Visibility = isMatrix3D ? Visibility.Collapsed : Visibility.Visible;
             if (_canvas3D.Parent is Grid container3D)
             {
                 container3D.Visibility = isMatrix3D ? Visibility.Visible : Visibility.Collapsed;
@@ -1049,6 +1155,14 @@ namespace Laba_1
 
                     foreach (var pt in results) _chartValues.Add(pt);
 
+                    if (results.Count > 0)
+                    {
+                        _dataMinN = results.Min(p => p.X ?? 1);
+                        _dataMaxN = results.Max(p => p.X ?? 500);
+                        ResetChartZoom();
+                    }
+
+                    // Расчет и построение идеальной кривой
                     CalculateTheoreticalCurve(algName, results);
                 });
             }, token);
@@ -1132,14 +1246,164 @@ namespace Laba_1
             }
         }
 
-        private void DrawMatrix3DSurface(double[,] zData, int count, int startN, int step)
-        {
-            _lastZData = zData;
-            _lastCount = count;
-            _lastStartN = startN;
-            _lastStep = step;
+        // --- Методы навигации, масштабирования и прокрутки 2D графика ---
 
-            _canvas3D.Children.Clear();
+        private Button CreateNavButton(string text, string hexColor)
+        {
+            return new Button
+            {
+                Content = text,
+                Height = 26,
+                Margin = new Thickness(3, 0, 0, 0),
+                Padding = new Thickness(8, 0, 8, 0),
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 11,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+        }
+
+        // Быстрый пропуск первых 25% (убирает стартовый системный шум)
+        private void SkipFirst25Percent()
+        {
+            double range = _dataMaxN - _dataMinN;
+            if (range <= 0) return;
+
+            double newMin = _dataMinN + range * 0.25;
+            _xAxis.MinLimit = newMin;
+            _xAxis.MaxLimit = _dataMaxN;
+            UpdateScrollBarAndLabel();
+        }
+
+        // Прокрутка влево / вправо по оси X
+        private void PanChart(double fraction)
+        {
+            double curMin = _xAxis.MinLimit ?? _dataMinN;
+            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
+            double viewWidth = curMax - curMin;
+            double totalRange = _dataMaxN - _dataMinN;
+            if (viewWidth >= totalRange && fraction < 0) return;
+
+            double shift = viewWidth * fraction;
+            double newMin = curMin + shift;
+            double newMax = curMax + shift;
+
+            if (newMin < _dataMinN)
+            {
+                newMin = _dataMinN;
+                newMax = newMin + viewWidth;
+            }
+            if (newMax > _dataMaxN)
+            {
+                newMax = _dataMaxN;
+                newMin = newMax - viewWidth;
+            }
+
+            _xAxis.MinLimit = newMin;
+            _xAxis.MaxLimit = newMax;
+            UpdateScrollBarAndLabel();
+        }
+
+        // Приближение / отдаление по оси X
+        private void ZoomChart(double factor)
+        {
+            double curMin = _xAxis.MinLimit ?? _dataMinN;
+            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
+            double center = (curMin + curMax) / 2.0;
+            double newHalfWidth = ((curMax - curMin) * factor) / 2.0;
+
+            double newMin = center - newHalfWidth;
+            double newMax = center + newHalfWidth;
+
+            if (factor > 1.0 && (newMin <= _dataMinN && newMax >= _dataMaxN))
+            {
+                ResetChartZoom();
+                return;
+            }
+
+            newMin = Math.Max(_dataMinN, newMin);
+            newMax = Math.Min(_dataMaxN, newMax);
+
+            if (newMax - newMin < 2) return; // Защита от чрезмерного приближения
+
+            _xAxis.MinLimit = newMin;
+            _xAxis.MaxLimit = newMax;
+            UpdateScrollBarAndLabel();
+        }
+
+        // Сброс масштаба на полный обзор всего графика (100%)
+        private void ResetChartZoom()
+        {
+            _xAxis.MinLimit = null;
+            _xAxis.MaxLimit = null;
+            UpdateScrollBarAndLabel();
+        }
+
+        // Прокрутка с помощью горизонтального бегунка ScrollBar
+        private void ChartScrollBar_Scroll(object sender, ScrollEventArgs e)
+        {
+            double totalRange = _dataMaxN - _dataMinN;
+            if (totalRange <= 0) return;
+
+            double curMin = _xAxis.MinLimit ?? _dataMinN;
+            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
+            double viewWidth = curMax - curMin;
+
+            if (viewWidth >= totalRange) return;
+
+            double availableScroll = totalRange - viewWidth;
+            double scrollFraction = Math.Max(0, Math.Min(1.0, e.NewValue / 100.0));
+            double newMin = _dataMinN + availableScroll * scrollFraction;
+            double newMax = newMin + viewWidth;
+
+            _xAxis.MinLimit = newMin;
+            _xAxis.MaxLimit = newMax;
+
+            double pct = Math.Min(100.0, (viewWidth / totalRange) * 100.0);
+            _lblZoomRange.Text = $"🔍 Просмотр: N от {newMin:F0} до {newMax:F0} ({pct:F0}% диапазона) | Прокручивайте вправо ▶";
+        }
+
+        // Синхронизация полосы прокрутки и текстовой подсказки с текущими границами
+        private void UpdateScrollBarAndLabel()
+        {
+            if (_lblZoomRange == null || _chartScrollBar == null || _xAxis == null) return;
+
+            double curMin = _xAxis.MinLimit ?? _dataMinN;
+            double curMax = _xAxis.MaxLimit ?? _dataMaxN;
+            double totalRange = Math.Max(1.0, _dataMaxN - _dataMinN);
+            double viewWidth = curMax - curMin;
+
+            if (_xAxis.MinLimit == null && _xAxis.MaxLimit == null)
+            {
+                _lblZoomRange.Text = $"🔍 Полный диапазон: N от {_dataMinN:F0} до {_dataMaxN:F0} (100%) | Колесико мыши: зум, ЛКМ: сдвиг";
+                _chartScrollBar.ViewportSize = 100;
+                _chartScrollBar.Value = 0;
+                _chartScrollBar.IsEnabled = false;
+            }
+            else
+            {
+                double pct = Math.Min(100.0, (viewWidth / totalRange) * 100.0);
+                _lblZoomRange.Text = $"🔍 Просмотр: N от {curMin:F0} до {curMax:F0} ({pct:F0}% диапазона) | Прокручивайте вправо ▶";
+
+                double availableScroll = totalRange - viewWidth;
+                if (availableScroll > 0)
+                {
+                    double fraction = Math.Max(0, Math.Min(1.0, (curMin - _dataMinN) / availableScroll));
+                    _chartScrollBar.ViewportSize = Math.Max(5.0, (viewWidth / totalRange) * 100.0);
+                    _chartScrollBar.Value = fraction * 100.0;
+                    _chartScrollBar.IsEnabled = true;
+                }
+                else
+                {
+                    _chartScrollBar.ViewportSize = 100;
+                    _chartScrollBar.Value = 0;
+                    _chartScrollBar.IsEnabled = false;
+                }
+            }
+        }
+
 
             if (_chkPractical != null && _chkTheoretical != null)
             {
