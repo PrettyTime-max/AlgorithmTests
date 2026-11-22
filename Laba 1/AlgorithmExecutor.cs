@@ -30,48 +30,28 @@ namespace Laba_1
                     return n;
 
                 case 5:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.BubbleSort(copy, n);
-                        return (long)n * n;
-                    }
+                    Algorithms.BubbleSort(doubleData, n);
+                    return (long)n * n;
 
                 case 6:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.QuickSort(copy, n);
-                        return (long)(n * Math.Log2(Math.Max(n, 1)));
-                    }
+                    Algorithms.QuickSort(doubleData, n);
+                    return (long)(n * Math.Log2(Math.Max(n, 2)));
 
                 case 7:
-                    {
-                        double[] copy = new double[n];
-                        Array.Copy(doubleData, copy, n);
-                        Algorithms.TimSort(copy, n);
-                        return (long)(n * Math.Log2(Math.Max(n, 1)));
-                    }
+                    Algorithms.TimSort(doubleData, n);
+                    return (long)(n * Math.Log2(Math.Max(n, 2)));
 
                 case 9:
                     Algorithms.HasDuplicates(intData, n);
                     return n;
 
                 case 10:
-                    {
-                        int[] copy = new int[n];
-                        Array.Copy(intData, copy, n);
-                        Algorithms.ReverseArray(copy, n);
-                        return n / 2;
-                    }
+                    Algorithms.ReverseArray(intData, n);
+                    return n / 2;
 
                 case 11:
-                    {
-                        int[] copy = new int[n];
-                        Array.Copy(intData, copy, n);
-                        Algorithms.ShellSort(copy, n);
-                        return (long)(n * Math.Log2(Math.Max(n, 1)));
-                    }
+                    Algorithms.ShellSort(intData, n);
+                    return (long)(n * Math.Log2(Math.Max(n, 2)));
 
                 case 12:
                     Algorithms.ResetSteps();
@@ -97,14 +77,17 @@ namespace Laba_1
             if (algorithmName.Contains("Постоянная"))
                 return (n => 1.0, "O(1)");
 
-            if (algorithmName.Contains("Bubble") || algorithmName.Contains("HasDuplicates") || algorithmName.Contains("Прямое вычисление"))
+            if (algorithmName.Contains("Bubble") || algorithmName.Contains("Прямое вычисление"))
                 return (n => n * n, "O(N²)");
 
-            if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort") || algorithmName.Contains("Shell"))
-                return (n => n * Math.Log2(Math.Max(n, 1)), "O(N log N)");
+            if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort"))
+                return (n => n * Math.Log2(Math.Max(n, 2)), "O(N log N)");
+
+            if (algorithmName.Contains("Shell"))
+                return (n => Math.Pow(Math.Max(n, 1), 1.25), "O(N^1.25)");
 
             if (algorithmName.Contains("быстрый") || algorithmName.Contains("бинарный") || algorithmName.Contains("PowBinary"))
-                return (n => Math.Log2(Math.Max(n, 1)), "O(log N)");
+                return (n => Math.Log2(Math.Max(n, 2)), "O(log N)");
 
             return (n => n, "O(N)");
         }

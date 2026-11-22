@@ -53,7 +53,7 @@ namespace Laba_1
             return dgResults;
         }
 
-        public static TextBox AddInputField(string label, string defaultValue, StackPanel container)
+        public static TextBox AddInputField(string label, string defaultValue, Panel container)
         {
             StackPanel fieldGroup = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
             fieldGroup.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 4) });

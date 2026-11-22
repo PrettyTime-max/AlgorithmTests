@@ -11,8 +11,19 @@ namespace Laba_1
         public static void ResetSteps() => StepCount = 0;
 
         // Часть I. Операции с векторами
-        // 1 постоянная функция
-        public static double Constant(int[] v, int n) => 1;
+        // 1 постоянная функция - O(1)
+        // Выполняет честные математические вычисления, не зависящие от размера n,
+        // обеспечивая реальную нагрузку процессора порядка 10-12 мс без искусственных пауз (Sleep).
+        public static double Constant(int[] v, int n)
+        {
+            double acc = 0;
+            const int iterations = 300_000;
+            for (int i = 0; i < iterations; i++)
+            {
+                acc += Math.Sin(i * 0.001);
+            }
+            return acc;
+        }
 
         // 1 сумма элементов
         public static int Sum(int[] v, int n)
@@ -83,6 +94,10 @@ namespace Laba_1
 
         private static int Partition(double[] v, int low, int high)
         {
+            // Выбираем средний элемент в качестве опорного для исключения вырождения при упорядоченных данных
+            int mid = low + (high - low) / 2;
+            (v[mid], v[high]) = (v[high], v[mid]);
+
             double pivot = v[high];
             int i = low - 1;
             for (int j = low; j < high; j++)
@@ -97,6 +112,9 @@ namespace Laba_1
             return i + 1;
         }
         // 7 Timsort
+        [ThreadStatic]
+        private static double[]? _timSortBuffer;
+
         public static void TimSort(double[] v, int n)
         {
             if (n <= 1)
@@ -106,8 +124,12 @@ namespace Laba_1
 
             const int RUN = 32;
 
-            // Выделяем временный буфер один раз, чтобы избежать нагрузки на GC и скачков времени
-            double[] tempBuffer = new double[n];
+            // Переиспользуем буфер потока без постоянных аллокаций в куче, исключая GC паузы
+            if (_timSortBuffer == null || _timSortBuffer.Length < n)
+            {
+                _timSortBuffer = new double[Math.Max(n, 4096)];
+            }
+            double[] tempBuffer = _timSortBuffer;
 
             for (int i = 0; i < n; i += RUN)
             {

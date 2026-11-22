@@ -15,14 +15,15 @@ namespace Laba_1
         public int StartN { get; set; }
         public int EndN { get; set; }
         public int Step { get; set; }
+        public int RunsCount { get; set; } = 1; // Количество прогонов для каждого N
         public DateTime CreatedAt { get; set; }
         public DateTime ExperimentDate { get; set; }
         public int MinN { get; set; }
         public int MaxN { get; set; }
         public int TotalRecords { get; set; }
 
-        // Оформление элемента в выпадающем списке (Дата | Алгоритм | Диапазон N)
-        public string DisplayText => $"{ExperimentDate.ToLocalTime():dd.MM.yyyy HH:mm:ss} | {AlgorithmName} (N={MinN}..{MaxN})";
+        // Оформление элемента в выпадающем списке (Дата | Алгоритм | Диапазон N | Прогоны)
+        public string DisplayText => $"{ExperimentDate.ToLocalTime():dd.MM.yyyy HH:mm:ss} | {AlgorithmName} (N={MinN}..{MaxN}, Прогонов: {RunsCount})";
 
         public override string ToString() => DisplayText;
     }
@@ -57,22 +58,32 @@ namespace Laba_1
         {
             using var db = new AppDbContext();
             await db.Database.EnsureCreatedAsync();
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE \"ExperimentSessions\" ADD COLUMN IF NOT EXISTS \"RunsCount\" integer NOT NULL DEFAULT 1;");
+            }
+            catch
+            {
+                // Игнорируем ошибку, если СУБД не поддерживает или колонка уже есть
+            }
         }
 
-        // Поиск ранее проведенной сессии по входным параметрам
-        public static async Task<ExperimentSession?> FindExistingSessionAsync(string algorithmName, int startN, int endN, int step)
+        // Поиск ранее проведенной сессии по входным параметрам, включая количество прогонов
+        public static async Task<ExperimentSession?> FindExistingSessionAsync(string algorithmName, int startN, int endN, int step, int runsCount = 1)
         {
             using var db = new AppDbContext();
             return await db.ExperimentSessions
                 .Where(s => s.AlgorithmName == algorithmName
                          && s.StartN == startN
                          && s.EndN == endN
-                         && s.Step == step)
+                         && s.Step == step
+                         && (s.RunsCount == runsCount || runsCount <= 0))
                 .OrderByDescending(s => s.ExperimentDate)
                 .FirstOrDefaultAsync();
         }
 
-        public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step) // создает новую запись в бд
+        public static async Task SaveResultsAsync(List<BenchmarkResult> results, string algorithmName, int startN, int endN, int step, int runsCount = 1) // создает новую запись в бд
         {
             if (results == null || results.Count == 0) return;
 
@@ -86,13 +97,14 @@ namespace Laba_1
                     res.ExperimentDate = now;
                 }
 
-                // Создаем объект сессии с параметрами диапазона
+                // Создаем объект сессии с параметрами диапазона и количеством прогонов
                 var session = new ExperimentSession
                 {
                     AlgorithmName = algorithmName,
                     StartN = startN,
                     EndN = endN,
                     Step = step,
+                    RunsCount = runsCount,
                     MinN = startN,
                     MaxN = endN,
                     CreatedAt = now,
