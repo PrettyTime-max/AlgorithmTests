@@ -239,7 +239,86 @@ namespace Laba_1
 
 
         // Часть III. Индивидуальное задание
-        // 9 проверка, есть ли в массиве повторяющиеся элементы
+        // 9 Поиск длины наибольшей возрастающей подпоследовательности (LIS, ДП) - O(n^2)
+        [ThreadStatic]
+        private static int[]? _lisBuffer;
+
+        public static int LongestIncreasingSubsequence(int[] v, int n)
+        {
+            if (n <= 1) return n;
+
+            if (_lisBuffer == null || _lisBuffer.Length < n)
+            {
+                _lisBuffer = new int[Math.Max(n, 4096)];
+            }
+            int[] dp = _lisBuffer;
+
+            int maxLen = 0;
+            for (int i = 0; i < n; i++)
+            {
+                dp[i] = 1;
+                for (int j = 0; j < i; j++)
+                {
+                    if (v[j] < v[i] && dp[j] + 1 > dp[i])
+                    {
+                        dp[i] = dp[j] + 1;
+                    }
+                }
+                if (dp[i] > maxLen) maxLen = dp[i];
+            }
+            return maxLen;
+        }
+
+        // 10 Циклическая сортировка (Cycle Sort) - O(n^2)
+        public static void CycleSort(double[] v, int n)
+        {
+            for (int cycleStart = 0; cycleStart < n - 1; cycleStart++)
+            {
+                double item = v[cycleStart];
+
+                // Находим позицию, куда нужно поместить элемент item
+                int pos = cycleStart;
+                for (int i = cycleStart + 1; i < n; i++)
+                {
+                    if (v[i] < item) pos++;
+                }
+
+                // Если элемент уже стоит на правильной позиции
+                if (pos == cycleStart) continue;
+
+                // Пропускаем повторяющиеся элементы
+                while (item == v[pos]) pos++;
+
+                // Помещаем item на правильное место
+                if (pos != cycleStart)
+                {
+                    double temp = v[pos];
+                    v[pos] = item;
+                    item = temp;
+                }
+
+                // Завершаем цикл, пока не вернемся в cycleStart
+                while (pos != cycleStart)
+                {
+                    pos = cycleStart;
+                    for (int i = cycleStart + 1; i < n; i++)
+                    {
+                        if (v[i] < item) pos++;
+                    }
+
+                    while (item == v[pos]) pos++;
+
+                    if (item != v[pos])
+                    {
+                        double temp = v[pos];
+                        v[pos] = item;
+                        item = temp;
+                    }
+                }
+            }
+        }
+
+        // Старые алгоритмы (сохранены для обратной совместимости)
         public static bool HasDuplicates(int[] v, int n)
         {
             var seen = new HashSet<int>();
@@ -251,7 +330,6 @@ namespace Laba_1
             return false;
         }
 
-        // 9 разворачивание массива, не создавая новый массив
         public static void ReverseArray(int[] v, int n)
         {
             int left = 0, right = n - 1;

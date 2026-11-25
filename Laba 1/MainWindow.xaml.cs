@@ -249,8 +249,8 @@ namespace Laba_1
             // Часть II. Матричные операции (3D)
             _cbAlgorithms.Items.Add("9. Умножение матриц A*B (3D Поверхность)");
             // Часть III. Индивидуальное задание
-            _cbAlgorithms.Items.Add("10. (HasDuplicates) Проверка дубликатов ");
-            _cbAlgorithms.Items.Add("11. (ReverseArray) Разворот массива");
+            _cbAlgorithms.Items.Add("10. (LIS) Наибольшая возрастающая подпоследовательность");
+            _cbAlgorithms.Items.Add("11. (CycleSort) Циклическая сортировка");
             _cbAlgorithms.Items.Add("12. (ShellSort) Сортировка Шелла");
             // Часть IV. Алгоритмы возведения в степень
             _cbAlgorithms.Items.Add("13. Простой итеративный алгоритм");
@@ -452,8 +452,8 @@ namespace Laba_1
             _compareAvailableListBox.Items.Add("6. (Bubble Sort) Алгоритм сортировки пузырьком");
             _compareAvailableListBox.Items.Add("7. (Quick Sort) Алгоритм быстрой сортировки");
             _compareAvailableListBox.Items.Add("8. (TimSort) Гибридный алгоритм сортировки элементов");
-            _compareAvailableListBox.Items.Add("10. (HasDuplicates) Проверка дубликатов ");
-            _compareAvailableListBox.Items.Add("11. (ReverseArray) Разворот массива");
+            _compareAvailableListBox.Items.Add("10. (LIS) Наибольшая возрастающая подпоследовательность");
+            _compareAvailableListBox.Items.Add("11. (CycleSort) Циклическая сортировка");
             _compareAvailableListBox.Items.Add("12. (ShellSort) Сортировка Шелла");
             _compareAvailableListBox.Items.Add("13. Простой итеративный алгоритм");
             _compareAvailableListBox.Items.Add("14. Рекурсивный алгоритм");
@@ -681,7 +681,7 @@ namespace Laba_1
             chartArea.Children.Add(navBorder);
 
             _compareXAxis = new Axis { Name = "Размер N" };
-            _compareYAxis = new Axis { Name = "Время (мс) / Шаги" };
+            _compareYAxis = new Axis { Name = "Время (мс) / Шаги", MinLimit = 0 };
 
             _compareChart = new CartesianChart
             {
@@ -1332,8 +1332,8 @@ namespace Laba_1
             if (name.Contains("Bubble")) return 5;
             if (name.Contains("Quick")) return 6;
             if (name.Contains("TimSort")) return 7;
-            if (name.Contains("Duplicates")) return 9;
-            if (name.Contains("ReverseArray") || name.Contains("Разворот")) return 10;
+            if (name.Contains("LIS") || name.Contains("подпоследовательн") || name.Contains("Duplicates")) return 9;
+            if (name.Contains("Cycle") || name.Contains("Циклическ") || name.Contains("ReverseArray") || name.Contains("Разворот")) return 10;
             if (name.Contains("Shell")) return 11;
             if (name.Contains("итеративный")) return 12;
             if (name.Contains("Рекурсивный")) return 13;
@@ -1360,6 +1360,8 @@ namespace Laba_1
             if (name.Contains("Bubble")) return "Bubble Sort O(N²)";
             if (name.Contains("Quick")) return "Quick Sort O(N log N)";
             if (name.Contains("TimSort")) return "TimSort O(N log N)";
+            if (name.Contains("LIS") || name.Contains("подпоследовательн")) return "LIS O(N²)";
+            if (name.Contains("Cycle") || name.Contains("Циклическ")) return "CycleSort O(N²)";
             if (name.Contains("Duplicates")) return "HasDuplicates O(N)";
             if (name.Contains("ReverseArray") || name.Contains("Разворот")) return "Разворот O(N)";
             if (name.Contains("Shell")) return "ShellSort O(N^1.25)";
@@ -1592,7 +1594,6 @@ namespace Laba_1
                 case 1: // 2. Сумма элементов O(N)
                 case 2: // 3. Произведение элементов O(N)
                 case 4: // 5. Полином по схеме Горнера O(N)
-                case 10: // 11. Разворот массива O(N)
                     _txtStartN.Text = "10000";
                     _txtEndN.Text = "500000";
                     _txtStep.Text = "20000";
@@ -1601,6 +1602,8 @@ namespace Laba_1
 
                 case 3: // 4. Прямое вычисление полинома O(N^2)
                 case 5: // 6. Bubble Sort O(N^2)
+                case 9: // 10. LIS O(N^2)
+                case 10: // 11. CycleSort O(N^2)
                     _txtStartN.Text = "200";
                     _txtEndN.Text = "3000";
                     _txtStep.Text = "100";
@@ -1621,13 +1624,6 @@ namespace Laba_1
                     _txtEndN.Text = "100";
                     _txtStep.Text = "10";
                     _txtRuns.Text = "1";
-                    break;
-
-                case 9: // 10. HasDuplicates O(N)
-                    _txtStartN.Text = "1000";
-                    _txtEndN.Text = "50000";
-                    _txtStep.Text = "2500";
-                    _txtRuns.Text = "5";
                     break;
 
                 case 12: // 13. PowIterative O(N)

@@ -42,12 +42,12 @@ namespace Laba_1
                     return (long)(n * Math.Log2(Math.Max(n, 2)));
 
                 case 9:
-                    Algorithms.HasDuplicates(intData, n);
-                    return n;
+                    Algorithms.LongestIncreasingSubsequence(intData, n);
+                    return (long)n * n;
 
                 case 10:
-                    Algorithms.ReverseArray(intData, n);
-                    return n / 2;
+                    Algorithms.CycleSort(doubleData, n);
+                    return (long)n * n;
 
                 case 11:
                     Algorithms.ShellSort(intData, n);
@@ -77,7 +77,9 @@ namespace Laba_1
             if (algorithmName.Contains("Постоянная"))
                 return (n => 1.0, "O(1)");
 
-            if (algorithmName.Contains("Bubble") || algorithmName.Contains("Прямое вычисление"))
+            if (algorithmName.Contains("Bubble") || algorithmName.Contains("Прямое вычисление") ||
+                algorithmName.Contains("Cycle") || algorithmName.Contains("Циклическ") ||
+                algorithmName.Contains("LIS") || algorithmName.Contains("подпоследовательн"))
                 return (n => n * n, "O(N²)");
 
             if (algorithmName.Contains("Quick") || algorithmName.Contains("TimSort"))

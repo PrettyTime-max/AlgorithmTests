@@ -38,7 +38,7 @@ namespace Laba_1
         public Chart2DService()
         {
             _xAxis = new Axis { Name = "Размер N" };
-            _yAxis = new Axis { Name = "Время (мс)" };
+            _yAxis = new Axis { Name = "Время (мс)", MinLimit = 0 };
 
             _chart = new CartesianChart
             {
