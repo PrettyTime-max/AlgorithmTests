@@ -65,6 +65,7 @@ namespace Laba_1
         private TextBox _txtCompareEndN = null!;
         private TextBox _txtCompareStep = null!;
         private TextBox _txtCompareRuns = null!;
+        private static long _compareResultSink;
         private Button _btnRunCompare = null!;
         private Button _btnStopCompare = null!;
         private Button _btnLoadCompareFromDb = null!;
@@ -198,10 +199,17 @@ namespace Laba_1
 
                 if (_compareCachedSessionsComboBox != null)
                 {
-                    _compareCachedSessionsComboBox.ItemsSource = sessions;
-                    if (sessions != null && sessions.Count > 0)
+                    var comparisonSessions = sessions?
+                        .Where(session => !IsPowerAlgorithmName(session.AlgorithmName))
+                        .ToList();
+                    _compareCachedSessionsComboBox.ItemsSource = comparisonSessions;
+                    if (comparisonSessions != null && comparisonSessions.Count > 0)
                     {
                         _compareCachedSessionsComboBox.SelectedIndex = 0;
+                    }
+                    else
+                    {
+                        _compareCachedSessionsComboBox.SelectedIndex = -1;
                     }
                 }
             }
@@ -337,7 +345,7 @@ namespace Laba_1
 
             _lblZoomRange = new TextBlock
             {
-                Text = "🖐️ Тачпад: щипок (pinch) — зум, 2 пальца влево/вправо — скролл | Или перетаскивание мышью",
+                Text = "Диапазон N",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
@@ -455,9 +463,6 @@ namespace Laba_1
             _compareAvailableListBox.Items.Add("10. (LIS) Наибольшая возрастающая подпоследовательность");
             _compareAvailableListBox.Items.Add("11. (CycleSort) Циклическая сортировка");
             _compareAvailableListBox.Items.Add("12. (ShellSort) Сортировка Шелла");
-            _compareAvailableListBox.Items.Add("13. Простой итеративный алгоритм");
-            _compareAvailableListBox.Items.Add("14. Рекурсивный алгоритм");
-            _compareAvailableListBox.Items.Add("15. Быстрый (бинарный) алгоритм возведения в степень");
 
             _compareAvailableListBox.PreviewMouseDown += CompareAvailable_PreviewMouseDown;
             _compareAvailableListBox.PreviewMouseMove += CompareAvailable_PreviewMouseMove;
@@ -551,7 +556,7 @@ namespace Laba_1
             _chkCompareTheoretical = new CheckBox
             {
                 Content = "📐 Показывать теоретические графики O(...)",
-                IsChecked = true,
+                IsChecked = false,
                 FontWeight = FontWeights.Bold,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4F46E5")),
                 Margin = new Thickness(0, 2, 0, 8)
@@ -646,7 +651,7 @@ namespace Laba_1
             DockPanel navDock = new DockPanel { LastChildFill = false };
             _lblCompareZoom = new TextBlock
             {
-                Text = "🖐️ Колесико / Щипок: мягкий зум | Перетаскивание мышью: сдвиг по оси N",
+                Text = "Диапазон N",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
@@ -681,7 +686,7 @@ namespace Laba_1
             chartArea.Children.Add(navBorder);
 
             _compareXAxis = new Axis { Name = "Размер N" };
-            _compareYAxis = new Axis { Name = "Время (мс) / Шаги", MinLimit = 0 };
+            _compareYAxis = new Axis { Name = "Время (мс)", MinLimit = 0 };
 
             _compareChart = new CartesianChart
             {
@@ -906,6 +911,8 @@ namespace Laba_1
 
         private void AddCompareItemByName(string itemStr)
         {
+            if (IsPowerAlgorithmName(itemStr)) return;
+
             int algoIdx = GetAlgorithmIndexByName(itemStr);
             string cleanName = CleanAlgoShortName(itemStr);
             bool alreadyExists = _compareSelectedListBox.Items.OfType<CompareItem>().Any(x => !x.IsFromDb && x.AlgorithmIndex == algoIdx);
@@ -918,6 +925,13 @@ namespace Laba_1
                     AlgorithmIndex = algoIdx
                 });
             }
+        }
+
+        private static bool IsPowerAlgorithmName(string name)
+        {
+            return name.Contains("итеративный", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("рекурсивный", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("бинарный", StringComparison.OrdinalIgnoreCase);
         }
 
         private void RemoveSelectedFromCompare()
@@ -939,6 +953,12 @@ namespace Laba_1
             if (_compareCachedSessionsComboBox.SelectedItem is not ExperimentSession session)
             {
                 MessageBox.Show("Выберите сохраненный замер из выпадающего списка БД.", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsPowerAlgorithmName(session.AlgorithmName))
+            {
+                MessageBox.Show("Алгоритмы возведения в степень недоступны в сравнении.", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -997,15 +1017,10 @@ namespace Laba_1
 
         private void PlotSessionOnCompareChart(ExperimentSession session, List<BenchmarkResult> records)
         {
-            bool isStepBased = records.Any(r => r.StepCount.HasValue) || session.AlgorithmName.Contains("степень");
-
             var aggregatedPoints = records
                 .GroupBy(r => r.N)
                 .OrderBy(g => g.Key)
-                .Select(g => new ObservablePoint(
-                    g.Key,
-                    isStepBased ? (g.First().StepCount ?? 0) : g.Min(r => r.ExecutionTimeMs)
-                ))
+                .Select(g => new ObservablePoint(g.Key, g.Min(r => r.ExecutionTimeMs)))
                 .ToList();
 
             if (aggregatedPoints.Count == 0) return;
@@ -1128,6 +1143,14 @@ namespace Laba_1
                 return;
             }
 
+            if (selectedItems.Any(item => IsPowerAlgorithmName(item.DisplayName)))
+            {
+                MessageBox.Show("Алгоритмы возведения в степень недоступны в сравнении.", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _compareYAxis.Name = "Время (мс)";
+
             _compareCts = new CancellationTokenSource();
             var token = _compareCts.Token;
 
@@ -1166,14 +1189,11 @@ namespace Laba_1
                     int algoIndex = item.AlgorithmIndex;
                     string rawName = GetAlgorithmFullNameByIndex(algoIndex);
                     string displayName = CleanAlgoShortName(rawName);
-                    bool isStepBased = algoIndex >= 12 && algoIndex <= 14;
-
                     _lblCompareStatus.Text = $"⏳ Выполняется живой замер ({i + 1}/{selectedItems.Count}): {displayName}...";
 
                     var points = await Task.Run(() =>
                     {
                         Random rng = new Random();
-                        Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
                         int warmupSize = Math.Min(500, endN);
                         int[] warmupInt = new int[warmupSize];
@@ -1193,72 +1213,78 @@ namespace Laba_1
 
                         int[] curInt = new int[endN];
                         double[] curDouble = new double[endN];
+                        bool canBatch = algoIndex == 1 || algoIndex == 2;
+                        int maxRandomValue = (int)Math.Min(int.MaxValue, Math.Max(10000L, (long)endN * 5));
+
+                        void FillRandomInput(int count)
+                        {
+                            for (int idx = 0; idx < count; idx++)
+                            {
+                                int val = rng.Next(1, maxRandomValue);
+                                curInt[idx] = val;
+                                curDouble[idx] = val;
+                            }
+                        }
 
                         for (int n = startN; n <= endN; n += step)
                         {
                             if (token.IsCancellationRequested) return null;
 
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers();
+                            List<double> runTimes = new List<double>(runsCount);
+                            int batchCount = 1;
 
-                            long lastSteps = 0;
-                            List<double> runTimes = new List<double>();
+                            // Сумма и произведение на малых N занимают меньше точности одного замера.
+                            // Подбираем размер пачки так, чтобы один замер длился около 5 мс.
+                            if (canBatch)
+                            {
+                                FillRandomInput(n);
+                                long elapsedTicks;
+                                do
+                                {
+                                    long result = 0;
+                                    long sTicks = Stopwatch.GetTimestamp();
+                                    for (int batch = 0; batch < batchCount; batch++)
+                                    {
+                                        if (token.IsCancellationRequested) return null;
+                                        AlgorithmExecutor.Execute(algoIndex, curInt, curDouble, n, out result);
+                                    }
+                                    elapsedTicks = Stopwatch.GetTimestamp() - sTicks;
+                                    Interlocked.Exchange(ref _compareResultSink, result);
+
+                                    if (elapsedTicks >= Stopwatch.Frequency / 200 || batchCount >= 65_536)
+                                    {
+                                        break;
+                                    }
+                                    batchCount = Math.Min(batchCount * 2, 65_536);
+                                } while (true);
+                            }
 
                             for (int r = 0; r < runsCount; r++)
                             {
                                 // Генерируем свежие случайные данные для каждого прогона n
-                                for (int idx = 0; idx < n; idx++)
-                                {
-                                    int val = rng.Next(1, Math.Max(10000, endN * 5));
-                                    curInt[idx] = val;
-                                    curDouble[idx] = val;
-                                }
+                                FillRandomInput(n);
 
+                                long result = 0;
                                 long sTicks = Stopwatch.GetTimestamp();
-                                long steps = AlgorithmExecutor.Execute(algoIndex, curInt, curDouble, n);
+                                for (int batch = 0; batch < batchCount; batch++)
+                                {
+                                    if (token.IsCancellationRequested) return null;
+                                    AlgorithmExecutor.Execute(algoIndex, curInt, curDouble, n, out result);
+                                }
                                 long eTicks = Stopwatch.GetTimestamp();
+                                Interlocked.Exchange(ref _compareResultSink, result);
 
-                                lastSteps = steps;
-                                double ms = (eTicks - sTicks) * 1000.0 / Stopwatch.Frequency;
+                                double ms = (eTicks - sTicks) * 1000.0 / Stopwatch.Frequency / batchCount;
                                 runTimes.Add(ms);
                             }
 
-                            if (isStepBased)
-                            {
-                                algoPoints.Add(new ObservablePoint(n, lastSteps));
-                            }
-                            else
-                            {
-                                runTimes.Sort();
-                                // Берем наименьшее время прогона (минимум из runsCount), так как любые прерывания ОС могут только завысить время
-                                double pureTime = runTimes[0];
-                                algoPoints.Add(new ObservablePoint(n, pureTime));
-                            }
+                            runTimes.Sort();
+                            int middle = runTimes.Count / 2;
+                            double medianTime = runTimes.Count % 2 == 1
+                                ? runTimes[middle]
+                                : (runTimes[middle - 1] + runTimes[middle]) / 2.0;
+                            algoPoints.Add(new ObservablePoint(n, medianTime));
                         }
-
-                        // Устранение редких изолированных выбросов планировщика Windows двухпроходным сглаживанием
-                        if (!isStepBased && algoPoints.Count > 2)
-                        {
-                            for (int pass = 0; pass < 2; pass++)
-                            {
-                                for (int p = 1; p < algoPoints.Count - 1; p++)
-                                {
-                                    double prevY = algoPoints[p - 1].Y ?? 0;
-                                    double currY = algoPoints[p].Y ?? 0;
-                                    double nextY = algoPoints[p + 1].Y ?? 0;
-                                    if (prevY > 0 && nextY > 0)
-                                    {
-                                        double baseline = (prevY + nextY) / 2.0;
-                                        if (currY > baseline * 1.3 || currY < baseline * 0.7)
-                                        {
-                                            algoPoints[p].Y = baseline;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Thread.CurrentThread.Priority = ThreadPriority.Normal;
                         return algoPoints;
                     }, token);
 

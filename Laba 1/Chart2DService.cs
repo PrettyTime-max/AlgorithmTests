@@ -238,12 +238,12 @@ namespace Laba_1
 
             if (_xAxis.MinLimit == null && _xAxis.MaxLimit == null)
             {
-                ZoomStatusChanged?.Invoke($"🔍 Полный диапазон: N от {_dataMinN:F0} до {_dataMaxN:F0} (100%) | Колесико мыши: зум, ЛКМ: сдвиг");
+                ZoomStatusChanged?.Invoke($"Полный диапазон: N от {_dataMinN:F0} до {_dataMaxN:F0} (100%)");
             }
             else
             {
                 double pct = Math.Min(100.0, (viewWidth / totalRange) * 100.0);
-                ZoomStatusChanged?.Invoke($"🔍 Просмотр: N от {curMin:F0} до {curMax:F0} ({pct:F0}% диапазона) | Сдвиг мышью");
+                ZoomStatusChanged?.Invoke($"Просмотр: N от {curMin:F0} до {curMax:F0} ({pct:F0}% диапазона)");
             }
         }
 

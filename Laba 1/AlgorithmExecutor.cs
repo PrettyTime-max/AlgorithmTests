@@ -6,7 +6,12 @@ namespace Laba_1
     {
         // Запускает алгоритм по его индексу и возвращает количество вычисленных операций (шагов)
         public static long Execute(int algorithmIndex, int[] intData, double[] doubleData, int n)
+            => Execute(algorithmIndex, intData, doubleData, n, out _);
+
+        // Результат вычисления можно прочитать после замера, чтобы JIT не считал его ненужным.
+        public static long Execute(int algorithmIndex, int[] intData, double[] doubleData, int n, out long result)
         {
+            result = 0;
             switch (algorithmIndex)
             {
                 case 0:
@@ -14,11 +19,11 @@ namespace Laba_1
                     return 1;
 
                 case 1:
-                    Algorithms.Sum(intData, n);
+                    result = Algorithms.Sum(intData, n);
                     return n;
 
                 case 2:
-                    Algorithms.Product(intData, n);
+                    result = Algorithms.Product(intData, n);
                     return n;
 
                 case 3:
